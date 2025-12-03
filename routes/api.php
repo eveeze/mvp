@@ -62,7 +62,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/my-deposits', [DepositController::class, 'index']); 
         
         // POST: Request Deposit Baru (Generate Snap Token Midtrans)
-        Route::post('/deposits', [DepositController::class, 'store']);   
+        Route::post('/deposits', [DepositController::class, 'store']);  
+        
+        Route::post('/media', [MediaController::class, 'store']); // Upload
+        Route::get('/media', [MediaController::class, 'index']);  // List & Check Status
     });
 
 });
