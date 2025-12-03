@@ -7,7 +7,7 @@ use App\Http\Controllers\Api\HotelController;
 use App\Http\Controllers\Api\ScreenController;
 use App\Http\Controllers\Api\DepositController;
 use App\Http\Controllers\Api\CallbackController; // Controller baru untuk Midtrans
-
+use App\Http\Controllers\Api\MediaController;
 /*
 |--------------------------------------------------------------------------
 | API Routes

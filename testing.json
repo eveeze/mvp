@@ -1,0 +1,353 @@
+{
+	"info": {
+		"_postman_id": "eveeze-mvp-day5",
+		"name": "DOOH / Hotel Ads Platform (Day 5)",
+		"description": "Collection lengkap untuk testing Auth, Deposit (Midtrans), dan Media (HLS).",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "1. Register Advertiser",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Juragan Iklan\",\n    \"email\": \"juragan{{$randomInt}}@example.com\",\n    \"password\": \"{{password}}\",\n    \"password_confirmation\": \"{{password}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/register-advertiser",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"auth",
+								"register-advertiser"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2. Login Advertiser",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"",
+									"// Cek jika login sukses",
+									"if (pm.response.code === 200) {",
+									"    // Simpan token ke environment variable secara otomatis",
+									"    pm.environment.set(\"token\", jsonData.access_token);",
+									"    console.log(\"Token saved:\", jsonData.access_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"juragan@example.com\",\n    \"password\": \"{{password}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/login",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"auth",
+								"login"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "3. Get Me (Check Token)",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/me",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"me"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Wallet & Midtrans",
+			"item": [
+				{
+					"name": "4. Create Deposit Request",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"",
+									"if (pm.response.code === 201) {",
+									"    // Ambil Order ID dari response data",
+									"    var orderId = jsonData.data.order_id;",
+									"    ",
+									"    // Simpan ke environment untuk dipakai di request callback",
+									"    pm.environment.set(\"current_order_id\", orderId);",
+									"    console.log(\"Order ID Saved:\", orderId);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"amount\": 100000\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/deposits",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"deposits"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "5. Webhook Midtrans (Simulasi)",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Ambil variable",
+									"var orderId = pm.environment.get(\"current_order_id\");",
+									"var serverKey = pm.environment.get(\"midtrans_server_key\");",
+									"var statusCode = \"200\";",
+									"var grossAmount = \"100000.00\"; // Format string desimal wajib sama",
+									"",
+									"// Pastikan Server Key ada",
+									"if (!serverKey) {",
+									"    console.error(\"Set 'midtrans_server_key' in Environment Variables first!\");",
+									"}",
+									"",
+									"// Generate Signature: SHA512(order_id + status_code + gross_amount + server_key)",
+									"// CryptoJS sudah built-in di Postman Sandbox",
+									"var input = orderId + statusCode + grossAmount + serverKey;",
+									"var signature = CryptoJS.SHA512(input).toString();",
+									"",
+									"// Set ke variable untuk dipakai di Body",
+									"pm.environment.set(\"generated_signature\", signature);",
+									"console.log(\"Generated Signature:\", signature);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"transaction_status\": \"settlement\",\n  \"order_id\": \"{{current_order_id}}\",\n  \"status_code\": \"200\",\n  \"gross_amount\": \"100000.00\",\n  \"payment_type\": \"bank_transfer\",\n  \"signature_key\": \"{{generated_signature}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/callback/midtrans",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"callback",
+								"midtrans"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Media (HLS)",
+			"item": [
+				{
+					"name": "6. Upload Video",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "video",
+									"type": "file",
+									"src": []
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/media",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"media"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "7. List Media",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/media",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"media"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000/api"
+		}
+	]
+}

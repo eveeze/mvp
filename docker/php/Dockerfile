@@ -19,6 +19,11 @@ RUN docker-php-ext-install pdo_pgsql pgsql mbstring exif pcntl bcmath gd intl
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
+# === PERUBAHAN DI SINI ===
+# Copy konfigurasi PHP custom (untuk menaikkan upload_max_filesize)
+# Pastikan file docker/php/uploads.ini sudah kamu buat sebelumnya
+COPY docker/php/uploads.ini /usr/local/etc/php/conf.d/uploads.ini
+
 WORKDIR /var/www
 
 # Permission handling (opsional, untuk menghindari isu permission di Linux host)
