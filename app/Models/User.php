@@ -32,4 +32,13 @@ class User extends Authenticatable
         'password',
         'remember_token',
     ];
+
+    /**
+     * Relasi ke Wallet (One-to-One)
+     * User punya satu Wallet.
+     */
+    public function wallet()
+    {
+        return $this->hasOne(Wallet::class);
+    }
 }

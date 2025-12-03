@@ -10,7 +10,8 @@ RUN apt-get update && apt-get install -y \
     zip \
     unzip \
     libpq-dev \
-    libicu-dev
+    libicu-dev \
+    ffmpeg
 
 # Install ekstensi PHP yang dibutuhkan Laravel & Postgres
 RUN docker-php-ext-install pdo_pgsql pgsql mbstring exif pcntl bcmath gd intl
