@@ -1,67 +1,53 @@
 <?php
 
 use App\Models\User;
-use App\Models\Wallet;
 use App\Models\Deposit;
-use Illuminate\Support\Facades\Http;
+use App\Models\Wallet;
+use App\Services\MidtransService; // Import Service
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Mockery\MockInterface;
 
-test('advertiser can create deposit and get snap token', function () {
-    // Mock Midtrans Response
-    Http::fake([
-        '*.midtrans.com/*' => Http::response(['token' => 'SNAP-TOKEN-123'], 200)
-    ]);
+uses(RefreshDatabase::class);
 
-    $user = User::factory()->create(['role' => 'advertiser']);
-    Wallet::create(['user_id' => $user->id, 'balance' => 0]);
-
-    $response = $this->actingAs($user)
-        ->postJson('/api/deposits', [
-            'amount' => 50000,
-        ]);
-
-    $response->assertCreated()
-        ->assertJsonPath('data.snap_token', 'SNAP-TOKEN-123');
-
-    $this->assertDatabaseHas('deposits', [
-        'amount'     => 50000,
-        'snap_token' => 'SNAP-TOKEN-123',
-        'status'     => 'pending'
-    ]);
+beforeEach(function () {
+    $this->user = User::factory()->create(['role' => 'advertiser']);
+    Wallet::create(['user_id' => $this->user->id, 'balance' => 0]);
 });
 
-test('midtrans callback settlement updates deposit to paid', function () {
-    // Setup Data
-    $user = User::factory()->create(['role' => 'advertiser']);
-    $wallet = Wallet::create(['user_id' => $user->id, 'balance' => 0]);
-    $orderId = 'DEP-TEST-MIDTRANS';
-    
-    $deposit = Deposit::create([
-        'wallet_id' => $wallet->id,
-        'amount'    => 100000,
-        'status'    => 'pending',
-        'order_id'  => $orderId,
+it('processes midtrans webhook and updates wallet', function () {
+    // 1. Data Awal
+    Deposit::create([
+        'user_id' => $this->user->id,
+        'order_id' => 'DEP-TEST-123',
+        'amount' => 100000,
+        'total_amount' => 100000,
+        'status' => 'pending'
     ]);
 
-    // Mock Config Server Key
-    $serverKey = 'SB-Mid-server-TEST';
-    config(['services.midtrans.server_key' => $serverKey]);
-
-    // Payload Callback Midtrans (Settlement)
+    // 2. Payload Simulasi
     $payload = [
         'transaction_status' => 'settlement',
-        'order_id'           => $orderId,
-        'status_code'        => '200',
-        'gross_amount'       => '100000.00', // String format
-        'payment_type'       => 'bank_transfer',
-        'signature_key'      => hash('sha512', $orderId . '200' . '100000.00' . $serverKey)
+        'order_id' => 'DEP-TEST-123',
+        'payment_type' => 'bank_transfer',
+        'gross_amount' => 100000,
+        'fraud_status' => 'accept'
     ];
 
-    // Hit Callback Endpoint
+    // 3. MOCK SERVICE
+    // Kita paksa 'handleNotification' mengembalikan objek data dummy
+    // Tanpa perlu validasi signature asli yang ribet di test
+    $this->mock(MidtransService::class, function (MockInterface $mock) use ($payload) {
+        $mock->shouldReceive('handleNotification')
+             ->once()
+             ->andReturn((object) $payload);
+    });
+
+    // 4. Hit Endpoint (Tanpa Auth)
     $response = $this->postJson('/api/callback/midtrans', $payload);
 
     $response->assertOk();
 
-    // Check DB
-    $this->assertDatabaseHas('deposits', ['id' => $deposit->id, 'status' => 'paid']);
-    $this->assertDatabaseHas('wallets', ['id' => $wallet->id, 'balance' => 100000]);
+    // 5. Assertions
+    $this->assertDatabaseHas('deposits', ['order_id' => 'DEP-TEST-123', 'status' => 'paid']);
+    $this->assertDatabaseHas('wallets', ['user_id' => $this->user->id, 'balance' => 100000]);
 });

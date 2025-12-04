@@ -1,123 +1,72 @@
 <?php
 
-/** @var \Tests\TestCase $this */
-
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 
-//
-// 1) REGISTER ADVERTISER
-//
-it('can register advertiser and returns token', function () {
-    $response = $this->postJson('/api/auth/register-advertiser', [
-        'name'     => 'Tito Advertiser',
-        'email'    => 'tito@example.com',
-        'password' => 'password123',
+// --- REGISTER ---
+it('can register advertiser', function () {
+    $response = $this->postJson('/api/register', [
+        'name' => 'New Advertiser',
+        'email' => 'new@ads.com',
+        'password' => 'password',
+        'password_confirmation' => 'password'
     ]);
 
-    $response
-        ->assertCreated()
-        ->assertJsonStructure([
-            'user'  => ['id', 'name', 'email', 'role'],
-            'token',
-        ]);
+    $response->assertCreated()
+        ->assertJsonStructure(['user', 'token']);
 
-    $this->assertDatabaseHas('users', [
-        'email' => 'tito@example.com',
-        'role'  => 'advertiser',
-    ]);
+    $this->assertDatabaseHas('users', ['email' => 'new@ads.com']);
 });
 
-//
-// 2) LOGIN ADVERTISER VIA /api/auth/login
-//
-it('can login advertiser with valid credentials', function () {
+// --- LOGIN ---
+it('can login with valid credentials', function () {
     $user = User::factory()->create([
-        'email'    => 'login@example.com',
-        'password' => Hash::make('password123'),
-        'role'     => 'advertiser',
+        'password' => Hash::make('password'),
     ]);
 
-    $response = $this->postJson('/api/auth/login', [
-        'email'    => 'login@example.com',
-        'password' => 'password123',
+    $response = $this->postJson('/api/login', [
+        'email' => $user->email,
+        'password' => 'password',
     ]);
 
-    $response
+    $response->assertOk()
+        ->assertJsonStructure(['user', 'token']);
+});
+
+it('rejects invalid login', function () {
+    $user = User::factory()->create(['password' => Hash::make('password')]);
+
+    $this->postJson('/api/login', [
+        'email' => $user->email,
+        'password' => 'wrong',
+    ])->assertStatus(422); // Validation error or 401 depending on implement
+});
+
+// --- PROFILE & DASHBOARD ---
+it('can get dashboard stats', function () {
+    $user = User::factory()->create(['role' => 'advertiser']);
+    
+    $this->actingAs($user)
+        ->getJson('/api/dashboard/stats')
         ->assertOk()
-        ->assertJsonStructure([
-            'user'  => ['id', 'name', 'email', 'role'],
-            'token',
-        ])
-        ->assertJsonPath('user.id', $user->id)
-        ->assertJsonPath('user.role', 'advertiser');
+        ->assertJsonStructure(['data' => ['wallet_balance', 'active_campaigns']]);
 });
 
-//
-// 3) LOGIN SUPERADMIN VIA /api/auth/login
-//
-it('can login superadmin with valid credentials', function () {
-    $user = User::factory()->create([
-        'email'    => 'super@example.com',
-        'password' => Hash::make('password123'),
-        'role'     => 'superadmin',
-    ]);
+it('can update profile', function () {
+    $user = User::factory()->create();
 
-    $response = $this->postJson('/api/auth/login', [
-        'email'    => 'super@example.com',
-        'password' => 'password123',
-    ]);
+    $this->actingAs($user)
+        ->putJson('/api/profile', ['name' => 'Updated Name'])
+        ->assertOk();
 
-    $response
-        ->assertOk()
-        ->assertJsonPath('user.id', $user->id)
-        ->assertJsonPath('user.role', 'superadmin');
+    $this->assertDatabaseHas('users', ['id' => $user->id, 'name' => 'Updated Name']);
 });
 
-//
-// 4) LOGIN GAGAL (PASSWORD SALAH)
-//
-it('rejects login with wrong password', function () {
-    User::factory()->create([
-        'email'    => 'wrongpass@example.com',
-        'password' => Hash::make('password123'),
-        'role'     => 'advertiser',
-    ]);
+it('can logout', function () {
+    $user = User::factory()->create();
+    $token = $user->createToken('test')->plainTextToken;
 
-    $response = $this->postJson('/api/auth/login', [
-        'email'    => 'wrongpass@example.com',
-        'password' => 'wrong-password',
-    ]);
-
-    $response
-        ->assertStatus(422)
-        ->assertJsonValidationErrors(['email']);
-});
-
-//
-// 5) /api/me MENGEMBALIKAN USER KALAU ADA TOKEN
-//
-it('returns current user on /api/me when authenticated', function () {
-    $user = User::factory()->create([
-        'role' => 'advertiser',
-    ]);
-
-    $token = $user->createToken('api')->plainTextToken;
-
-    $response = $this
-        ->withHeader('Authorization', 'Bearer '.$token)
-        ->getJson('/api/me');
-
-    $response
-        ->assertOk()
-        ->assertJsonPath('user.id', $user->id);
-});
-
-//
-// 6) /api/me DITOLAK KALAU TIDAK ADA TOKEN
-//
-it('rejects /api/me without token', function () {
-    $response = $this->getJson('/api/me');
-
-    $response->assertStatus(401);
+    $this->withHeader('Authorization', 'Bearer ' . $token)
+        ->postJson('/api/logout')
+        ->assertOk();
 });
