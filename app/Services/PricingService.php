@@ -19,7 +19,7 @@ class PricingService
             return $screen->hotel->price_override * $playsPerDay * $days;
         }
 
-        // 3. Cek Rate Card
+        // 3. Cek Rate Card (Berdasarkan Bintang Hotel)
         $rate = RateCard::where('hotel_star_rating', $screen->hotel->star_rating)
             ->where('duration_days', '<=', $days)
             ->orderByDesc('duration_days')
@@ -27,11 +27,11 @@ class PricingService
 
         if ($rate) {
             $dailyRate = $rate->base_price / $rate->duration_days;
-            // [FIX] Dikali playsPerDay agar logikanya sama dengan override
+            // [FIX] Wajib dikali playsPerDay
             return $dailyRate * $days * $playsPerDay; 
         }
 
-        // 4. Default
+        // 4. Default Fallback
         return 10000 * $playsPerDay * $days;
     }
 }

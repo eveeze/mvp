@@ -8,7 +8,7 @@ use App\Models\CampaignItem;
 use App\Models\Screen;
 use App\Models\Media;
 use App\Services\WalletService;
-use App\Services\PricingService; // [NEW]
+use App\Services\PricingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -17,7 +17,7 @@ use Carbon\Carbon;
 class CampaignController extends Controller
 {
     protected $walletService;
-    protected $pricingService; // [NEW]
+    protected $pricingService;
 
     public function __construct(WalletService $walletService, PricingService $pricingService)
     {
@@ -58,7 +58,7 @@ class CampaignController extends Controller
                 $campaignItemsData = [];
 
                 foreach ($request->screens as $item) {
-                    $screen = Screen::with('hotel') 
+                    $screen = Screen::with('hotel')
                                 ->where('id', $item['id'])
                                 ->lockForUpdate() 
                                 ->first();
@@ -71,23 +71,27 @@ class CampaignController extends Controller
                         throw ValidationException::withMessages(['media' => "Media duration too long."]);
                     }
 
-                    // Inventory Check
+                    // --- CEK KAPASITAS / OVERBOOKING ---
+                    // Pastikan menggunakan whereDate untuk akurasi tanggal
                     $existingUsage = CampaignItem::where('screen_id', $screen->id)
                         ->whereHas('campaign', function ($query) use ($startDate, $endDate) {
                             $query->where('status', 'active')
                                   ->where(function ($q) use ($startDate, $endDate) {
-                                      $q->where('start_date', '<=', $endDate)
-                                        ->where('end_date', '>=', $startDate);
+                                      $q->whereDate('start_date', '<=', $endDate)
+                                        ->whereDate('end_date', '>=', $startDate);
                                   });
                         })
                         ->sum('plays_per_day');
 
                     $requestedPlays = $item['plays_per_day'];
                     if (($existingUsage + $requestedPlays) > $screen->max_plays_per_day) {
-                        throw ValidationException::withMessages(['screens' => "Screen {$screen->name} full."]);
+                        $sisa = max(0, $screen->max_plays_per_day - $existingUsage);
+                        throw ValidationException::withMessages([
+                            'screens' => "Screen '{$screen->name}' penuh. Sisa slot: {$sisa}."
+                        ]);
                     }
 
-                    // [NEW] Hitung Harga via Service
+                    // Hitung Harga
                     $itemTotalCost = $this->pricingService->calculatePrice($screen, $days, $requestedPlays);
                     $priceSnapshot = $itemTotalCost / ($requestedPlays * $days);
 
@@ -98,10 +102,20 @@ class CampaignController extends Controller
                         'media_id'       => $media->id,
                         'plays_per_day'  => $requestedPlays,
                         'price_per_play' => $priceSnapshot,
+                        'pricing_type'   => 'dynamic',
                     ];
                 }
 
-                $this->walletService->debitBalance($user, $totalCost); // Throw exception if failed
+                // --- CEK & POTONG SALDO (FIX LOGIC) ---
+                // Sebelumnya hanya dipanggil tanpa dicek hasilnya. Sekarang dicek.
+                $balanceOk = $this->walletService->debitBalance($user, $totalCost);
+                
+                if (!$balanceOk) {
+                    throw ValidationException::withMessages([
+                        'balance' => 'Saldo Wallet tidak mencukupi. Total tagihan: ' . number_format($totalCost)
+                    ]);
+                }
+                // --------------------------------------
 
                 $campaign = Campaign::create([
                     'user_id'    => $user->id,
