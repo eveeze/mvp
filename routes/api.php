@@ -12,21 +12,18 @@ use App\Http\Controllers\Api\DepositController;
 use App\Http\Controllers\Api\CallbackController;
 use App\Http\Controllers\Api\CampaignController;
 use App\Http\Controllers\Api\PlayerController;
+use App\Http\Controllers\Api\DashboardController; // Baru
 
 /*
 |--------------------------------------------------------------------------
-| Public Routes (Tanpa Login User)
+| Public Routes
 |--------------------------------------------------------------------------
 */
-
-// Auth User
-Route::post('/register', [AuthController::class, 'register']); // Method sudah diganti jadi 'register' di Controller
+Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
-
-// Midtrans Callback
 Route::post('/callback/midtrans', [CallbackController::class, 'handleMidtrans']);
 
-// === PLAYER / IOT ROUTES ===
+// === PLAYER / IOT ROUTES (Device) ===
 Route::prefix('player')->group(function () {
     Route::get('/playlist', [PlayerController::class, 'getPlaylist']);
     Route::post('/heartbeat', [PlayerController::class, 'heartbeat']);
@@ -34,14 +31,15 @@ Route::prefix('player')->group(function () {
 
 /*
 |--------------------------------------------------------------------------
-| Protected Routes (Harus Login: Admin / Advertiser)
+| Protected Routes (Login Required)
 |--------------------------------------------------------------------------
 */
 Route::middleware('auth:sanctum')->group(function () {
     
-    // User Info & Logout
-    Route::get('/user', [AuthController::class, 'me']); // Saya arahkan ke method 'me' biar rapi
-    Route::post('/logout', [AuthController::class, 'logout']); // Method ini sekarang sudah ada
+    // Global User Routes
+    Route::get('/user', [AuthController::class, 'me']);
+    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::put('/profile', [DashboardController::class, 'updateProfile']);
 
     // === ROLE: SUPER ADMIN ===
     Route::middleware('role:super_admin')->group(function () {
@@ -52,20 +50,22 @@ Route::middleware('auth:sanctum')->group(function () {
     // === ROLE: ADVERTISER ===
     Route::middleware('role:advertiser')->group(function () {
         
-        // 1. Finance
+        // Dashboard Stats
+        Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
+
+        // Finance
         Route::post('/deposits', [DepositController::class, 'store']);
         Route::get('/deposits', [DepositController::class, 'index']);
         
-        // 2. Asset Management
+        // Assets
         Route::post('/media', [MediaController::class, 'store']);
         Route::get('/media', [MediaController::class, 'index']);
         
-        // 3. Campaign / Booking
+        // Campaigns
         Route::apiResource('campaigns', CampaignController::class)
              ->only(['index', 'store', 'show']);
              
-        // Public Screens list for Advertiser
+        // Tools
         Route::get('/public/screens', [ScreenController::class, 'index']); 
     });
-
 });
