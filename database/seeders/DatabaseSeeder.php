@@ -2,24 +2,25 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
     /**
      * Seed the application's database.
      */
     public function run(): void
     {
-        // User::factory(10)->create();
-
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
+        // Panggil Seeder untuk Super Admin agar akun admin terbentuk
+        $this->call([
+            SuperAdminSeeder::class,
         ]);
+        
+        // Opsional: Jika ingin user dummy tambahan untuk testing
+        // \App\Models\User::factory()->create([
+        //     'name' => 'Test Advertiser',
+        //     'email' => 'test@example.com',
+        //     'role' => 'advertiser',
+        // ]);
     }
 }

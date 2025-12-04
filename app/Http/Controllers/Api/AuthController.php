@@ -11,7 +11,8 @@ use Illuminate\Validation\ValidationException;
 class AuthController extends Controller
 {
     /**
-     * Register advertiser baru.
+     * Register user baru (Advertiser).
+     * Method ini dipanggil oleh route POST /register
      */
     public function register(Request $request)
     {
@@ -25,7 +26,7 @@ class AuthController extends Controller
             'name'     => $validated['name'],
             'email'    => $validated['email'],
             'password' => Hash::make($validated['password']),
-            'role'     => 'advertiser',
+            'role'     => 'advertiser', // Default role register
         ]);
 
         $token = $user->createToken('api')->plainTextToken;
@@ -54,7 +55,7 @@ class AuthController extends Controller
             ]);
         }
 
-        // Hapus token lama agar bersih (opsional)
+        // Hapus token lama agar single device login (opsional, tapi aman)
         $user->tokens()->delete();
 
         $token = $user->createToken('api')->plainTextToken;
@@ -66,11 +67,11 @@ class AuthController extends Controller
     }
 
     /**
-     * Logout user (Hapus token).
+     * Logout user.
+     * Menghapus token akses saat ini.
      */
     public function logout(Request $request)
     {
-        // Menghapus token yang sedang digunakan saat ini
         $request->user()->currentAccessToken()->delete();
 
         return response()->json([
@@ -79,7 +80,7 @@ class AuthController extends Controller
     }
 
     /**
-     * Info user login.
+     * Mendapatkan info user yang sedang login.
      */
     public function me(Request $request)
     {
