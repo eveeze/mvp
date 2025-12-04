@@ -10,44 +10,33 @@ use Illuminate\Validation\Rule;
 
 class HotelController extends Controller
 {
-    /**
-     * Menampilkan daftar hotel dengan fitur pencarian dan pagination.
-     */
     public function index(Request $request)
     {
         $query = Hotel::query();
 
-        // Fitur 1: Pencarian berdasarkan nama
         if ($request->filled('search')) {
             $query->where('name', 'like', '%' . $request->search . '%');
         }
 
-        // Fitur 2: Filter status aktif (Opsional)
         if ($request->filled('is_active')) {
             $query->where('is_active', $request->boolean('is_active'));
         }
 
-        // Production Fix: Gunakan paginate, bukan get() untuk performa
         $hotels = $query->latest()->paginate(10);
 
-        return response()->json([
-            'status' => 'success',
-            'data' => $hotels,
-        ]);
+        return response()->json(['status' => 'success', 'data' => $hotels]);
     }
 
-    /**
-     * Menyimpan data hotel baru.
-     */
     public function store(Request $request)
     {
         $validated = $request->validate([
-            // FIX: Validasi unique mencegah duplikasi nama di level aplikasi
             'name'           => ['required', 'string', 'max:255', 'unique:hotels,name'],
             'city'           => ['nullable', 'string', 'max:255'],
             'address'        => ['nullable', 'string', 'max:500'],
             'contact_person' => ['nullable', 'string', 'max:255'],
             'contact_phone'  => ['nullable', 'string', 'max:50'],
+            'star_rating'    => ['required', 'integer', 'min:1', 'max:5'], 
+            'price_override' => ['nullable', 'numeric', 'min:0'],
             'is_active'      => ['boolean'],
         ]);
 
@@ -55,44 +44,29 @@ class HotelController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Hotel created successfully.',
+            'message' => 'Hotel created.',
             'data' => $hotel,
-        ], Response::HTTP_CREATED);
+        ], 201);
     }
 
-    /**
-     * Menampilkan detail hotel.
-     */
     public function show(string $id)
     {
         $hotel = Hotel::findOrFail($id);
-
-        return response()->json([
-            'status' => 'success',
-            'data' => $hotel,
-        ]);
+        return response()->json(['status' => 'success', 'data' => $hotel]);
     }
 
-    /**
-     * Memperbarui data hotel.
-     */
     public function update(Request $request, string $id)
     {
         $hotel = Hotel::findOrFail($id);
 
         $validated = $request->validate([
-            // FIX: Validasi unique, tapi KECUALIKAN id hotel ini sendiri
-            'name'           => [
-                'sometimes', 
-                'required', 
-                'string', 
-                'max:255', 
-                Rule::unique('hotels', 'name')->ignore($hotel->id)
-            ],
+            'name'           => ['sometimes', 'required', 'string', 'max:255', Rule::unique('hotels', 'name')->ignore($hotel->id)],
             'city'           => ['nullable', 'string', 'max:255'],
             'address'        => ['nullable', 'string', 'max:500'],
             'contact_person' => ['nullable', 'string', 'max:255'],
             'contact_phone'  => ['nullable', 'string', 'max:50'],
+            'star_rating'    => ['sometimes', 'integer', 'min:1', 'max:5'],
+            'price_override' => ['nullable', 'numeric', 'min:0'],
             'is_active'      => ['boolean'],
         ]);
 
@@ -100,24 +74,15 @@ class HotelController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Hotel updated successfully.',
+            'message' => 'Hotel updated.',
             'data' => $hotel->fresh(),
         ]);
     }
 
-    /**
-     * Menghapus hotel (Soft Delete).
-     */
     public function destroy(string $id)
     {
         $hotel = Hotel::findOrFail($id);
-        
-        // Data tidak benar-benar hilang, hanya ditandai terhapus (Soft Delete)
         $hotel->delete();
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Hotel deleted successfully.',
-        ]);
+        return response()->json(['status' => 'success', 'message' => 'Hotel deleted.']);
     }
 }

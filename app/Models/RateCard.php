@@ -11,8 +11,10 @@ class RateCard extends Model
         'duration_days',
         'base_price',
     ];
-    
+
     protected $casts = [
         'base_price' => 'decimal:2',
+        'hotel_star_rating' => 'integer',
+        'duration_days' => 'integer',
     ];
 }

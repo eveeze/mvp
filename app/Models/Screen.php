@@ -11,28 +11,30 @@ class Screen extends Model
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
-        'hotel_id', 
-        'name', 
-        'code', 
+        'hotel_id',
+        'name',
+        'code',
         'location',
-        'resolution_width', 
-        'resolution_height', 
+        'resolution_width',
+        'resolution_height',
         'orientation',
-        'price_per_play', 
-        'max_plays_per_day', // Field Baru
-        'max_duration_sec',  // Field Baru
-        'is_active', 
-        'is_online', 
+        'price_per_play',     
+        'max_plays_per_day',
+        'max_duration_sec',
+        'is_active',          
+        'is_online',          
         'allowed_categories',
     ];
 
     protected $casts = [
-        'is_active' => 'boolean',
-        'is_online' => 'boolean',
+        'is_active'          => 'boolean',
+        'is_online'          => 'boolean',
         'allowed_categories' => 'array',
-        'price_per_play' => 'decimal:2',
-        'max_plays_per_day' => 'integer',
-        'max_duration_sec' => 'integer',
+        'price_per_play'     => 'decimal:2', 
+        'resolution_width'   => 'integer',
+        'resolution_height'  => 'integer',
+        'max_plays_per_day'  => 'integer',
+        'max_duration_sec'   => 'integer',
     ];
 
     public function scopeActive($query)
