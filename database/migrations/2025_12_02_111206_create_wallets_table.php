@@ -10,8 +10,12 @@ return new class extends Migration
     {
         Schema::create('wallets', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            $table->decimal('balance', 15, 2)->default(0); // Contoh: 100000.00
+            // Satu user hanya punya satu wallet
+            $table->foreignId('user_id')->unique()->constrained()->cascadeOnDelete();
+            
+            // Decimal 15,2 artinya total 15 digit, 2 di belakang koma (support ratusan triliun)
+            $table->decimal('balance', 15, 2)->default(0); 
+            
             $table->timestamps();
         });
     }

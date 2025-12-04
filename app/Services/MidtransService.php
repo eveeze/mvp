@@ -2,75 +2,42 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\Http;
+use Midtrans\Config;
+use Midtrans\Snap;
+use Midtrans\Notification;
 
 class MidtransService
 {
-    protected string $serverKey;
-    protected string $snapUrl;
-    protected bool $isProduction;
-
     public function __construct()
     {
-        $this->serverKey    = config('services.midtrans.server_key');
-        $this->snapUrl      = config('services.midtrans.snap_url');
-        $this->isProduction = config('services.midtrans.is_production');
+        // Konfigurasi Midtrans Global
+        Config::$serverKey = config('services.midtrans.server_key');
+        Config::$isProduction = config('services.midtrans.is_production');
+        Config::$isSanitized = true;
+        Config::$is3ds = true;
     }
 
     /**
-     * Create Snap Token
+     * Generate Snap Token untuk Frontend
      */
-    public function createSnapToken(string $orderId, int $amount, object $user)
+    public function createSnapToken(array $params)
     {
-        // Auth Header: base64(ServerKey + ':')
-        $auth = base64_encode($this->serverKey . ':');
+        return Snap::getSnapToken($params);
+    }
 
-        $payload = [
-            'transaction_details' => [
-                'order_id'     => $orderId,
-                'gross_amount' => $amount,
-            ],
-            'customer_details' => [
-                'first_name' => $user->name,
-                'email'      => $user->email,
-            ],
-            'item_details' => [
-                [
-                    'id'       => 'DEPOSIT',
-                    'price'    => $amount,
-                    'quantity' => 1,
-                    'name'     => 'Deposit Saldo Ads',
-                ]
-            ],
-            'enabled_payments' => ['gopay', 'bank_transfer', 'qris'], // Opsional: batasi metode
-        ];
-
-        $response = Http::withHeaders([
-            'Authorization' => 'Basic ' . $auth,
-            'Content-Type'  => 'application/json',
-            'Accept'        => 'application/json',
-        ])->post($this->snapUrl, $payload);
-
-        if ($response->failed()) {
-            throw new \Exception('Midtrans Error: ' . $response->body());
+    /**
+     * Handle notifikasi webhook dari Midtrans
+     */
+    public function handleNotification()
+    {
+        // Midtrans mengirim payload via PHP input stream
+        // Class Notification otomatis memvalidasi Signature Key di dalamnya
+        try {
+            $notification = new Notification();
+            return $notification;
+        } catch (\Exception $e) {
+            \Log::error('Midtrans Notification Error: ' . $e->getMessage());
+            return null;
         }
-
-        return $response->json('token');
-    }
-
-    /**
-     * Validate Signature from Midtrans Callback
-     * Signature = SHA512(order_id + status_code + gross_amount + ServerKey)
-     */
-    public function isValidSignature(array $notification): bool
-    {
-        $orderId    = $notification['order_id'];
-        $statusCode = $notification['status_code'];
-        $grossAmount = $notification['gross_amount'];
-        $signature  = $notification['signature_key'];
-
-        $calculated = hash('sha512', $orderId . $statusCode . $grossAmount . $this->serverKey);
-
-        return $calculated === $signature;
     }
 }

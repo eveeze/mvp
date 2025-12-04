@@ -16,7 +16,8 @@ class ProcessVideoUpload implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $timeout = 600; // 10 menit timeout karena render video lama
+    // Timeout 20 menit karena proses video HLS cukup berat
+    public $timeout = 1200; 
 
     public function __construct(protected Media $media) {}
 
@@ -24,70 +25,100 @@ class ProcessVideoUpload implements ShouldQueue
     {
         $this->media->update(['status' => 'processing']);
 
+        // 1. Siapkan Folder Temporary di Server (Local)
+        // Kita butuh folder khusus per video agar file .ts tidak tercampur
+        $tempDir = storage_path('app/temp/' . $this->media->id);
+        
+        // Pastikan folder bersih/baru
+        if (File::exists($tempDir)) {
+            File::deleteDirectory($tempDir);
+        }
+        File::makeDirectory($tempDir, 0777, true);
+
+        $localRawPath = $tempDir . '/raw_input.mp4';
+        $hlsPlaylistName = 'playlist.m3u8';
+        $localPlaylistPath = $tempDir . '/' . $hlsPlaylistName;
+
         try {
-            // 1. Download file asli dari Storage ke Local Temp (container)
-            $tempLocalPath = storage_path('app/temp/' . $this->media->id . '_raw.mp4');
-            $hlsOutputDir  = storage_path('app/public/hls/' . $this->media->id);
-            
-            // Pastikan direktori ada
-            if (!File::exists(dirname($tempLocalPath))) File::makeDirectory(dirname($tempLocalPath), 0755, true);
-            if (!File::exists($hlsOutputDir)) File::makeDirectory($hlsOutputDir, 0755, true);
+            // 2. Download File Mentah dari Storage ke Temp Folder
+            File::put($localRawPath, Storage::get($this->media->path_original));
 
-            // Copy dari S3/Local Storage ke temp folder processing
-            file_put_contents($tempLocalPath, Storage::get($this->media->path_original));
+            // 3. Ambil Durasi Video (Detik) menggunakan ffprobe
+            $durationProcess = Process::fromShellCommandline("ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {$localRawPath}");
+            $durationProcess->run();
+            $duration = (int) floatval($durationProcess->getOutput());
 
-            // 2. Jalankan FFmpeg Command
-            // Convert ke HLS (.m3u8) dengan segmen 10 detik
-            $playlistPath = $hlsOutputDir . '/playlist.m3u8';
+            // 4. Jalankan FFmpeg untuk Konversi ke HLS
+            // -hls_time 10         : Setiap pecahan video berdurasi 10 detik
+            // -hls_list_size 0     : Simpan semua list segmen (mode VOD/Video on Demand)
+            // -hls_segment_filename: Pola nama file pecahan (segment_001.ts, segment_002.ts, dst)
             
-            $command = [
+            $convertCommand = [
                 'ffmpeg',
-                '-i', $tempLocalPath,
-                '-profile:v', 'baseline', // Profile ringan kompatibel banyak device
-                '-level', '3.0',
-                '-start_number', '0',
-                '-hls_time', '10',        // Durasi per pecahan (segment)
-                '-hls_list_size', '0',    // 0 = simpan semua list (VOD), bukan live
-                '-f', 'hls',
-                $playlistPath
+                '-y',                // Overwrite output
+                '-i', $localRawPath, // Input file
+                '-c:v', 'libx264',   // Video Codec (H.264)
+                '-crf', '23',        // Kualitas Visual (makin kecil makin bagus, standar 23)
+                '-preset', 'fast',   // Kecepatan encoding
+                '-c:a', 'aac',       // Audio Codec
+                '-b:a', '128k',      // Bitrate Audio
+                '-g', '60',          // Keyframe interval (penting utk streaming lancar)
+                '-hls_time', '10',   
+                '-hls_list_size', '0',
+                '-hls_segment_filename', $tempDir . '/segment_%03d.ts',
+                '-f', 'hls',         // Format output HLS
+                $localPlaylistPath
             ];
 
-            $process = new Process($command);
-            $process->setTimeout(600);
+            $process = new Process($convertCommand);
+            $process->setTimeout(1200); // Samakan dengan timeout job
             $process->run();
 
             if (!$process->isSuccessful()) {
-                throw new \Exception('FFmpeg failed: ' . $process->getErrorOutput());
+                throw new \Exception('FFmpeg Failed: ' . $process->getErrorOutput());
             }
 
-            // 3. Upload Hasil (Folder HLS) kembali ke MinIO (S3)
-            $files = File::allFiles($hlsOutputDir);
-            $s3BasePath = 'hls/' . $this->media->id;
-
+            // 5. Upload Hasil (Folder HLS) ke S3
+            // Kita simpan di folder S3: videos/hls/{id}/
+            $s3Folder = 'videos/hls/' . $this->media->id;
+            
+            $files = File::files($tempDir);
             foreach ($files as $file) {
-                // Upload .m3u8 dan .ts files
+                // Skip file raw input, kita cuma mau upload hasil convert (.m3u8 & .ts)
+                if ($file->getFilename() === 'raw_input.mp4') continue;
+
                 Storage::disk('s3')->putFileAs(
-                    $s3BasePath, 
-                    $file, 
-                    $file->getFilename(), 
-                    'public' // Set visibility public
+                    $s3Folder,
+                    $file,
+                    $file->getFilename(),
+                    'public' // Set visibilitas public agar bisa di-stream player
                 );
             }
 
-            // 4. Update Database
-            $this->media->update([
-                'status'   => 'completed',
-                'path_hls' => $s3BasePath . '/playlist.m3u8'
-            ]);
+            // Path final adalah lokasi file .m3u8 utama
+            $finalPath = $s3Folder . '/' . $hlsPlaylistName;
 
-            // 5. Cleanup File Sampah di Container
-            File::delete($tempLocalPath);
-            File::deleteDirectory($hlsOutputDir);
+            // 6. Update Database & Bersihkan File Mentah
+            // Hapus file raw upload user dari S3 untuk hemat biaya (opsional)
+            if ($this->media->path_original) {
+                Storage::delete($this->media->path_original); 
+            }
+
+            $this->media->update([
+                'status' => 'completed',
+                'path_optimized' => $finalPath,
+                'path_original' => null, // File raw sudah dihapus
+                'duration' => $duration
+            ]);
 
         } catch (\Exception $e) {
             $this->media->update(['status' => 'failed']);
-            \Log::error("Video Processing Failed ID {$this->media->id}: " . $e->getMessage());
-            throw $e; // Retry job if config allows
+            \Log::error("HLS Processing Error (Media ID {$this->media->id}): " . $e->getMessage());
+        } finally {
+            // 7. Bersihkan Folder Temp di Server
+            if (File::exists($tempDir)) {
+                File::deleteDirectory($tempDir);
+            }
         }
     }
 }

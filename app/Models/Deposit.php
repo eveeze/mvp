@@ -2,27 +2,33 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Deposit extends Model
 {
+    use HasFactory;
+
     protected $fillable = [
-        'wallet_id',
+        'user_id',
+        'order_id',
         'amount',
+        'admin_fee',
+        'total_amount',
         'status',
-        'payment_method', // Nullable
-        'order_id',       // Midtrans
-        'snap_token',     // Midtrans
-        'payment_type',   // Midtrans
-        'raw_response'    // Midtrans
+        'snap_token',
+        'payment_details'
     ];
 
     protected $casts = [
-        'raw_response' => 'array',
+        'amount'          => 'decimal:2',
+        'admin_fee'       => 'decimal:2',
+        'total_amount'    => 'decimal:2',
+        'payment_details' => 'array',
     ];
 
-    public function wallet()
+    public function user()
     {
-        return $this->belongsTo(Wallet::class);
+        return $this->belongsTo(User::class);
     }
 }

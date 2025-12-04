@@ -10,23 +10,23 @@ return new class extends Migration
     {
         Schema::create('deposits', function (Blueprint $table) {
             $table->id();
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             
-            // Relasi ke Wallet
-            $table->foreignId('wallet_id')->constrained()->cascadeOnDelete();
+            // Order ID unik dari sistem kita (misal: DEP-12345678)
+            $table->string('order_id')->unique();
             
-            // Data Dasar Deposit
-            $table->integer('amount');
-            $table->string('status')->default('pending'); // pending, paid, failed
+            $table->decimal('amount', 15, 2);
+            $table->decimal('admin_fee', 10, 2)->default(0); // Jika ada biaya admin
+            $table->decimal('total_amount', 15, 2); // amount + fee
             
-            // Kolom Pembayaran (Midtrans / Manual)
-            // PENTING: nullable() agar tidak error saat create awal
-            $table->string('payment_method')->nullable(); 
+            // Status: pending, paid, failed, expired
+            $table->string('status')->default('pending');
             
-            // Kolom Khusus Midtrans
-            $table->string('order_id')->nullable()->unique(); // ID unik kita (DEP-xxx)
-            $table->string('snap_token')->nullable();       // Token dari Midtrans Snap
-            $table->string('payment_type')->nullable();     // Tipe bayar (gopay, bank_transfer, dll)
-            $table->json('raw_response')->nullable();       // Log response lengkap
+            // Token dari Midtrans untuk frontend menampilkan popup pembayaran
+            $table->string('snap_token')->nullable();
+            
+            // Data tambahan dari callback (bank pengirim, waktu bayar, dll)
+            $table->json('payment_details')->nullable(); 
             
             $table->timestamps();
         });

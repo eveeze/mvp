@@ -4,73 +4,81 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Deposit;
-use App\Models\Wallet;
 use App\Services\MidtransService;
+use App\Services\WalletService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class CallbackController extends Controller
 {
-    public function handleMidtrans(Request $request, MidtransService $midtransService)
+    public function handleMidtrans(Request $request, MidtransService $midtrans, WalletService $walletService)
     {
-        $payload = $request->all();
+        // 1. Terima & Validasi Notifikasi Midtrans
+        $notification = $midtrans->handleNotification();
 
-        // 1. Validasi Signature
-        if (!$midtransService->isValidSignature($payload)) {
+        if (!$notification) {
             return response()->json(['message' => 'Invalid signature'], 403);
         }
 
-        // 2. Ambil Data Penting
-        $orderId = $payload['order_id'];
-        $transactionStatus = $payload['transaction_status'];
-        $fraudStatus = $payload['fraud_status'] ?? null;
-        $paymentType = $payload['payment_type'] ?? null;
+        $transactionStatus = $notification->transaction_status;
+        $type = $notification->payment_type;
+        $orderId = $notification->order_id;
+        $fraud = $notification->fraud_status;
 
-        // 3. Cari Deposit
+        // Cari transaksi deposit kita berdasarkan Order ID
         $deposit = Deposit::where('order_id', $orderId)->first();
+
         if (!$deposit) {
             return response()->json(['message' => 'Order not found'], 404);
         }
 
+        // Idempotency Check: Jika sudah 'paid', jangan proses lagi (untuk menghindari saldo ganda)
         if ($deposit->status === 'paid') {
-            return response()->json(['message' => 'Already paid'], 200);
+            return response()->json(['message' => 'Already processed']);
         }
 
-        // 4. Tentukan Status Baru
+        // 2. Tentukan Status Akhir
         $newStatus = null;
+
         if ($transactionStatus == 'capture') {
-            if ($fraudStatus == 'challenge') {
-                $newStatus = 'pending'; // Perlu review manual di dashboard midtrans
+            // Untuk pembayaran kartu kredit
+            if ($fraud == 'challenge') {
+                $newStatus = 'pending'; // Perlu review manual di dashboard Midtrans
             } else {
                 $newStatus = 'paid';
             }
-        } else if ($transactionStatus == 'settlement') {
+        } elseif ($transactionStatus == 'settlement') {
+            // Untuk transfer bank, gopay, dll (Uang sudah masuk)
             $newStatus = 'paid';
-        } else if ($transactionStatus == 'pending') {
+        } elseif ($transactionStatus == 'pending') {
             $newStatus = 'pending';
-        } else if (in_array($transactionStatus, ['deny', 'expire', 'cancel'])) {
+        } elseif ($transactionStatus == 'deny') {
+            $newStatus = 'failed';
+        } elseif ($transactionStatus == 'expire') {
+            $newStatus = 'expired';
+        } elseif ($transactionStatus == 'cancel') {
             $newStatus = 'failed';
         }
 
-        // 5. Update DB (Atomic Transaction)
+        // 3. Update Database & Saldo
         if ($newStatus) {
-            DB::transaction(function () use ($deposit, $newStatus, $payload, $paymentType) {
-                // Update Deposit
-                $deposit->update([
-                    'status'       => $newStatus,
-                    'payment_type' => $paymentType,
-                    'raw_response' => $payload
-                ]);
+            $deposit->status = $newStatus;
+            $deposit->payment_details = $request->all(); // Simpan log raw dari midtrans
+            $deposit->save();
 
-                // Jika PAID, tambah saldo wallet
-                if ($newStatus === 'paid') {
-                    $wallet = Wallet::lockForUpdate()->find($deposit->wallet_id);
-                    $wallet->increment('balance', $deposit->amount);
+            // Jika status menjadi PAID, tambahkan saldo ke Wallet User
+            if ($newStatus === 'paid') {
+                try {
+                    $walletService->creditBalance($deposit->user, $deposit->amount);
+                    Log::info("Saldo ditambahkan ke User ID: {$deposit->user_id} sebesar {$deposit->amount}");
+                } catch (\Exception $e) {
+                    Log::error("Gagal menambah saldo wallet: " . $e->getMessage());
+                    // Catatan: Jika gagal update wallet tapi status deposit paid, 
+                    // ini perlu penanganan manual/log khusus.
                 }
-            });
+            }
         }
 
-        return response()->json(['success' => true]);
+        return response()->json(['message' => 'Callback processed']);
     }
 }

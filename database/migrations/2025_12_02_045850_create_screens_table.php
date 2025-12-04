@@ -9,33 +9,38 @@ return new class extends Migration {
     {
         Schema::create('screens', function (Blueprint $table) {
             $table->id();
-
-            // Relasi ke hotels
+            
+            // Relasi ke hotel (Cascade delete)
             $table->foreignId('hotel_id')
                 ->constrained()
                 ->cascadeOnDelete();
 
-            $table->string('name');                     // Nama layar, mis: "Lobby Screen 1"
-            $table->string('code', 100)->nullable();    // Kode internal, optional
-            $table->string('location')->nullable();     // Lokasi fisik, mis "Lobby", "Lift Area"
+            $table->string('name');
+            $table->string('code')->unique()->nullable(); // Device ID
+            $table->string('location')->nullable();
 
-            // Resolusi
-            $table->unsignedInteger('resolution_width')->nullable();   // px
-            $table->unsignedInteger('resolution_height')->nullable();  // px
-
-            // Orientasi: 'landscape' | 'portrait'
+            $table->unsignedInteger('resolution_width')->default(1920);
+            $table->unsignedInteger('resolution_height')->default(1080);
             $table->string('orientation', 20)->default('landscape');
 
-            // Status online / offline
-            $table->boolean('is_online')->default(true);
+            // Logic Bisnis
+            $table->decimal('price_per_play', 12, 2)->default(0); 
+            
+            // FITUR BARU: Kapasitas Inventory
+            // Max slot iklan dalam sehari (misal: 1000 slot)
+            $table->integer('max_plays_per_day')->default(1000); 
+            
+            // Batas durasi video per iklan (detik)
+            $table->integer('max_duration_sec')->default(60);
 
-            // Kategori iklan yang diizinkan (disimpan sebagai JSON array)
+            $table->boolean('is_active')->default(true);  // Status Admin
+            $table->boolean('is_online')->default(false); // Status Device
             $table->json('allowed_categories')->nullable();
 
             $table->timestamps();
+            $table->softDeletes();
 
-            // Index tambahan
-            $table->index(['hotel_id', 'is_online']);
+            $table->index(['hotel_id', 'is_active']);
         });
     }
 

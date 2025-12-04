@@ -9,12 +9,20 @@ return new class extends Migration {
     {
         Schema::create('hotels', function (Blueprint $table) {
             $table->id();
-            $table->string('name');               // nama hotel
-            $table->string('city')->nullable();   // kota
+            // Menambahkan unique constraint untuk mencegah duplikasi nama
+            $table->string('name')->unique(); 
+            $table->string('city')->nullable();
             $table->string('address')->nullable();
             $table->string('contact_person')->nullable();
             $table->string('contact_phone')->nullable();
+            
+            // Menambahkan status untuk kontrol operasional (Production best practice)
+            $table->boolean('is_active')->default(true);
+            
             $table->timestamps();
+            
+            // Soft deletes agar data aman dan bisa direstore jika tidak sengaja terhapus
+            $table->softDeletes();
         });
     }
 

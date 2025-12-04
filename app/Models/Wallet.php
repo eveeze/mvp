@@ -11,13 +11,12 @@ class Wallet extends Model
 
     protected $fillable = ['user_id', 'balance'];
 
+    protected $casts = [
+        'balance' => 'decimal:2',
+    ];
+
     public function user()
     {
         return $this->belongsTo(User::class);
-    }
-
-    public function deposits()
-    {
-        return $this->hasMany(Deposit::class);
     }
 }

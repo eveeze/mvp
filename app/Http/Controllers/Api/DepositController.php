@@ -4,58 +4,97 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Deposit;
-use App\Models\Wallet;
 use App\Services\MidtransService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 class DepositController extends Controller
 {
-    protected MidtransService $midtransService;
+    protected $midtrans;
 
-    public function __construct(MidtransService $midtransService)
+    public function __construct(MidtransService $midtrans)
     {
-        $this->midtransService = $midtransService;
+        $this->midtrans = $midtrans;
     }
 
+    /**
+     * User request deposit baru.
+     */
     public function store(Request $request)
     {
         $request->validate([
-            'amount' => ['required', 'integer', 'min:10000'],
+            'amount' => 'required|numeric|min:10000', // Minimal deposit 10rb
         ]);
 
         $user = $request->user();
+        $amount = $request->input('amount');
         
-        // Pastikan wallet ada
-        $wallet = Wallet::firstOrCreate(['user_id' => $user->id], ['balance' => 0]);
+        // Generate Order ID Unik
+        $orderId = 'DEP-' . time() . '-' . Str::upper(Str::random(5));
 
-        // Generate Order ID Unik: DEP-[TIMESTAMP]-[RANDOM]
-        $orderId = 'DEP-' . time() . '-' . Str::random(5);
+        // 1. Simpan ke database (Status: Pending)
+        $deposit = Deposit::create([
+            'user_id'      => $user->id,
+            'order_id'     => $orderId,
+            'amount'       => $amount,
+            'total_amount' => $amount, // + Admin fee jika ada
+            'status'       => 'pending',
+        ]);
+
+        // 2. Siapkan parameter Midtrans Snap
+        $params = [
+            'transaction_details' => [
+                'order_id'     => $orderId,
+                'gross_amount' => (int) $amount,
+            ],
+            'customer_details' => [
+                'first_name' => $user->name,
+                'email'      => $user->email,
+            ],
+            // Opsional: Item Details agar muncul di email invoice Midtrans
+            'item_details' => [
+                [
+                    'id'       => 'DEPOSIT',
+                    'price'    => (int) $amount,
+                    'quantity' => 1,
+                    'name'     => 'Deposit Saldo Eveeze'
+                ]
+            ]
+        ];
 
         try {
-            // 1. Get Snap Token from Midtrans
-            $snapToken = $this->midtransService->createSnapToken($orderId, $request->amount, $user);
+            // 3. Minta Snap Token ke Midtrans
+            $snapToken = $this->midtrans->createSnapToken($params);
 
-            // 2. Simpan Deposit ke DB (Status Pending)
-            $deposit = Deposit::create([
-                'wallet_id'  => $wallet->id,
-                'amount'     => $request->amount,
-                'status'     => 'pending',
-                'order_id'   => $orderId,
-                'snap_token' => $snapToken,
-            ]);
+            // Update token di database
+            $deposit->update(['snap_token' => $snapToken]);
 
             return response()->json([
-                'message' => 'Deposit created',
-                'data'    => [
-                    'deposit_id' => $deposit->id,
-                    'snap_token' => $snapToken, // Frontend pakai ini utk window.snap.pay(token)
+                'status' => 'success',
+                'data'   => [
                     'order_id'   => $orderId,
+                    'snap_token' => $snapToken,
+                    'amount'     => $amount
                 ]
-            ], 201);
+            ]);
 
         } catch (\Exception $e) {
-            return response()->json(['message' => $e->getMessage()], 500);
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], 500);
         }
+    }
+
+    /**
+     * List histori deposit user.
+     */
+    public function index(Request $request)
+    {
+        $deposits = Deposit::where('user_id', $request->user()->id)
+            ->latest()
+            ->paginate(10);
+
+        return response()->json(['data' => $deposits]);
     }
 }

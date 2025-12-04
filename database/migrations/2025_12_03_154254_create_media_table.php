@@ -10,19 +10,22 @@ return new class extends Migration
     {
         Schema::create('media', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->cascadeOnDelete(); // Uploader
-            $table->string('file_name');      // Nama file asli (iklan_sepatu.mp4)
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            
+            $table->string('file_name');      // Nama asli file (contoh: iklan.mp4)
             $table->string('mime_type');      // video/mp4
-            $table->bigInteger('size');       // bytes
+            $table->bigInteger('size');       // ukuran bytes
+            $table->integer('duration')->nullable(); // Durasi (detik)
             
-            // Path Processing
-            $table->string('path_original');  // Path file mentah di storage
-            $table->string('path_hls')->nullable(); // Path .m3u8 final di MinIO
+            // Path
+            $table->string('path_original')->nullable();  // File mentah upload user
+            $table->string('path_optimized')->nullable(); // Path ke file playlist .m3u8 di S3
             
-            // Status Konversi
-            $table->string('status')->default('pending'); // pending, processing, completed, failed
+            // Status: pending, processing, completed, failed
+            $table->string('status')->default('pending'); 
             
             $table->timestamps();
+            $table->softDeletes(); // Agar data aman (tidak langsung hilang saat dihapus)
         });
     }
 

@@ -2,52 +2,50 @@
 
 namespace App\Services;
 
-use App\Models\Deposit;
 use App\Models\User;
 use App\Models\Wallet;
 use Illuminate\Support\Facades\DB;
-use Exception;
 
 class WalletService
 {
     /**
-     * Advertiser membuat request deposit
+     * Menambah saldo user (Credit) dengan aman.
      */
-    public function createDeposit(User $user, float $amount, string $paymentMethod): Deposit
+    public function creditBalance(User $user, float $amount, string $description = 'Topup'): Wallet
     {
-        // 1. Pastikan user punya wallet (create jika belum ada)
-        $wallet = $user->wallet ?? Wallet::create([
-            'user_id' => $user->id, 
-            'balance' => 0
-        ]);
+        return DB::transaction(function () use ($user, $amount) {
+            // Lock row wallet agar tidak ada proses lain yang mengubahnya bersamaan
+            $wallet = Wallet::firstOrCreate(['user_id' => $user->id]);
+            
+            // Re-fetch dengan lock
+            $wallet = Wallet::where('user_id', $user->id)->lockForUpdate()->first();
 
-        // 2. Buat record deposit status PENDING
-        return Deposit::create([
-            'wallet_id' => $wallet->id,
-            'amount' => $amount,
-            'status' => 'pending',
-            'payment_method' => $paymentMethod,
-            // Generate kode unik sederhana
-            'payment_reference' => 'DEP-' . time() . rand(100, 999),
-        ]);
+            $wallet->balance += $amount;
+            $wallet->save();
+
+            // Opsional: Catat riwayat mutasi (Transaction History) di sini
+            // TransactionHistory::create([...]);
+
+            return $wallet;
+        });
     }
 
     /**
-     * Superadmin menyetujui deposit -> Saldo Bertambah
+     * Mengurangi saldo user (Debit)
      */
-    public function approveDeposit(Deposit $deposit): void
+    public function debitBalance(User $user, float $amount): bool
     {
-        if ($deposit->status === 'paid') {
-            throw new Exception("Deposit ini sudah disetujui sebelumnya.");
-        }
+        return DB::transaction(function () use ($user, $amount) {
+            $wallet = Wallet::where('user_id', $user->id)->lockForUpdate()->first();
 
-        // Mulai transaksi database (PENTING untuk data uang)
-        DB::transaction(function () use ($deposit) {
-            // 1. Update status deposit jadi 'paid'
-            $deposit->update(['status' => 'paid']);
+            if (!$wallet || $wallet->balance < $amount) {
+                return false; // Saldo kurang
+            }
 
-            // 2. Tambahkan saldo ke wallet user
-            $deposit->wallet->increment('balance', $deposit->amount);
+            $wallet->balance -= $amount;
+            $wallet->save();
+
+            return true;
         });
     }
 }
