@@ -2,70 +2,76 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+
+// Import Controllers
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\HotelController;
 use App\Http\Controllers\Api\ScreenController;
-use App\Http\Controllers\Api\DepositController;
-use App\Http\Controllers\Api\CallbackController; // Controller baru untuk Midtrans
 use App\Http\Controllers\Api\MediaController;
+use App\Http\Controllers\Api\DepositController;
+use App\Http\Controllers\Api\CallbackController;
+use App\Http\Controllers\Api\CampaignController;
+use App\Http\Controllers\Api\PlayerController; // Controller Baru
+
 /*
 |--------------------------------------------------------------------------
-| API Routes
+| Public Routes (Tanpa Login User)
 |--------------------------------------------------------------------------
 */
 
-// === Public Routes ===
+// Auth User
+Route::post('/register', [AuthController::class, 'register']);
+Route::post('/login', [AuthController::class, 'login']);
 
-// Auth
-Route::prefix('auth')->group(function () {
-    Route::post('register-advertiser', [AuthController::class, 'registerAdvertiser']);
-    Route::post('login', [AuthController::class, 'login']);
+// Midtrans Callback (Wajib Public agar bisa ditembak Midtrans)
+Route::post('/callback/midtrans', [CallbackController::class, 'handleMidtrans']);
+
+// === PLAYER / IOT ROUTES ===
+// Diakses oleh TV/Videotron (Menggunakan Device ID)
+Route::prefix('player')->group(function () {
+    Route::get('/playlist', [PlayerController::class, 'getPlaylist']);
+    Route::post('/heartbeat', [PlayerController::class, 'heartbeat']);
 });
 
-// MIDTRANS CALLBACK / WEBHOOK
-// Penting: Route ini harus PUBLIC (di luar middleware auth:sanctum)
-// Midtrans akan mengirim POST request ke sini untuk update status pembayaran
-Route::post('callback/midtrans', [CallbackController::class, 'handleMidtrans']);
-
-
-// === Protected Routes (Butuh Token) ===
+/*
+|--------------------------------------------------------------------------
+| Protected Routes (Harus Login: Admin / Advertiser)
+|--------------------------------------------------------------------------
+*/
 Route::middleware('auth:sanctum')->group(function () {
     
-    // Global User Info
-    Route::get('/me', [AuthController::class, 'me']);
+    // User Info
+    Route::get('/user', function (Request $request) {
+        return $request->user();
+    });
+    Route::post('/logout', [AuthController::class, 'logout']);
 
-    // === Role: Superadmin ===
-    Route::middleware('role:superadmin')->group(function () {
-        // CMS Hotel
-        Route::apiResource('hotels', HotelController::class)
-            ->only(['index', 'store', 'show', 'update', 'destroy']);
-
-        // CMS Screen per Hotel (nested)
-        Route::prefix('hotels/{hotel}')->group(function () {
-            Route::get('screens', [ScreenController::class, 'index']);
-            Route::post('screens', [ScreenController::class, 'store']);
-            Route::get('screens/{screen}', [ScreenController::class, 'show']);
-            Route::put('screens/{screen}', [ScreenController::class, 'update']);
-            Route::delete('screens/{screen}', [ScreenController::class, 'destroy']);
-        });
-
-        // Deposit Approval
-        // Jika menggunakan Midtrans full otomatis, ini mungkin jarang dipakai.
-        // Tapi tetap bisa disimpan untuk admin mengecek/mengelola deposit manual jika ada.
-        Route::post('/admin/deposits/{id}/approve', [DepositController::class, 'approve']);
+    // === ROLE: SUPER ADMIN ===
+    Route::middleware('role:super_admin')->group(function () {
+        // Manajemen Hotel & Screen
+        Route::apiResource('hotels', HotelController::class);
+        Route::apiResource('hotels.screens', ScreenController::class);
     });
 
-    // === Role: Advertiser ===
+    // === ROLE: ADVERTISER ===
     Route::middleware('role:advertiser')->group(function () {
-        // Wallet & Deposit
-        // GET: Melihat histori deposit
-        Route::get('/my-deposits', [DepositController::class, 'index']); 
         
-        // POST: Request Deposit Baru (Generate Snap Token Midtrans)
-        Route::post('/deposits', [DepositController::class, 'store']);  
+        // 1. Finance (Deposit & Wallet)
+        Route::post('/deposits', [DepositController::class, 'store']);
+        Route::get('/deposits', [DepositController::class, 'index']);
         
-        Route::post('/media', [MediaController::class, 'store']); // Upload
-        Route::get('/media', [MediaController::class, 'index']);  // List & Check Status
+        // 2. Asset Management (Video Upload)
+        Route::post('/media', [MediaController::class, 'store']); // Upload Video
+        Route::get('/media', [MediaController::class, 'index']);
+        
+        // 3. Campaign / Booking (Core Business)
+        Route::apiResource('campaigns', CampaignController::class)
+             ->only(['index', 'store', 'show']);
+             
+        // Advertiser bisa melihat list screen untuk memilih (Read Only)
+        Route::get('/public/screens', [ScreenController::class, 'index']); 
+        // ^ Note: Logic "Read Only Screen" bisa dibuat method khusus di ScreenController
+        // atau gunakan endpoint hotels.screens jika diizinkan.
     });
 
 });
