@@ -13,26 +13,38 @@ class Media extends Model
 
     protected $fillable = [
         'user_id', 
+        'type', // Baru
         'file_name', 
         'mime_type', 
         'size', 
         'duration',
         'path_original', 
         'path_optimized', 
-        'status'
+        'thumbnail_path', // Baru
+        'status', // processing status
+        'moderation_status', // Baru: pending, approved, rejected
+        'moderation_notes' // Baru
     ];
 
     /**
-     * Helper untuk mendapatkan URL Streaming.
-     * Otomatis mengarah ke file .m3u8 di S3 jika status completed.
+     * URL Utama (Video/Image Optimized)
      */
     public function getUrlAttribute()
     {
         if ($this->status === 'completed' && $this->path_optimized) {
-            // Mengembalikan URL publik S3 ke file .m3u8
             return Storage::disk('s3')->url($this->path_optimized);
         }
-        
         return null;
+    }
+
+    /**
+     * URL Thumbnail (Untuk CMS)
+     */
+    public function getThumbnailUrlAttribute()
+    {
+        if ($this->thumbnail_path) {
+            return Storage::disk('s3')->url($this->thumbnail_path);
+        }
+        return null; // Bisa diganti dengan URL placeholder default
     }
 }

@@ -5,68 +5,66 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Media;
 use App\Jobs\ProcessVideoUpload;
+use App\Jobs\ProcessImageUpload;
 use Illuminate\Http\Request;
 
 class MediaController extends Controller
 {
-    /**
-     * Upload Video Iklan (Advertiser).
-     */
     public function store(Request $request)
     {
         $request->validate([
-            // Validasi file: Wajib video (mp4/mov/avi), Max 100MB
-            'video' => 'required|file|mimetypes:video/mp4,video/quicktime,video/x-msvideo|max:102400',
+            'file' => 'required|file|max:102400|mimetypes:video/mp4,video/quicktime,image/jpeg,image/png,image/webp',
         ]);
 
-        $file = $request->file('video');
+        $file = $request->file('file');
         $user = $request->user();
+        $mimeType = $file->getMimeType();
+        
+        // Deteksi Tipe
+        $type = str_starts_with($mimeType, 'video') ? 'video' : 'image';
+        $folder = $type === 'video' ? 'videos/temp' : 'images/temp';
 
-        // 1. Simpan file 'mentah' ke folder temporary (bisa di local atau s3)
-        // Kita simpan sebagai 'temp' agar nanti dihapus oleh Job setelah sukses convert
-        $path = $file->store('videos/temp', 'local'); 
-        // Catatan: Jika server production menggunakan multi-server, gunakan disk 's3' untuk temp storage juga.
+        // Upload Raw
+        $path = $file->store($folder, 's3');
 
-        // 2. Buat Record DB
         $media = Media::create([
             'user_id'       => $user->id,
+            'type'          => $type,
             'file_name'     => $file->getClientOriginalName(),
-            'mime_type'     => $file->getMimeType(),
+            'mime_type'     => $mimeType,
             'size'          => $file->getSize(),
             'path_original' => $path,
-            'status'        => 'pending' // Status awal: Pending
+            'status'        => 'pending',
+            'moderation_status' => 'pending', // Default pending
         ]);
 
-        // 3. Dispatch Job (Background Process)
-        // Video akan diproses menjadi HLS di latar belakang
-        ProcessVideoUpload::dispatch($media);
+        // Dispatch Job Sesuai Tipe
+        if ($type === 'video') {
+            ProcessVideoUpload::dispatch($media);
+        } else {
+            ProcessImageUpload::dispatch($media);
+        }
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Video uploaded. Processing started in background.',
+            'message' => 'Media uploaded.',
             'data'    => $media
         ], 201);
     }
 
-    /**
-     * List Video milik User.
-     */
     public function index(Request $request)
     {
         $medias = Media::where('user_id', $request->user()->id)
-                    ->orderBy('created_at', 'desc')
-                    ->paginate(10); 
+                    ->latest()
+                    ->paginate(10);
 
-        // Append URL attribute ke JSON result
-        // Agar frontend langsung dapat URL .m3u8
+        // Append helper URLs
         $medias->getCollection()->transform(function ($media) {
-            $media->url = $media->url; // Trigger accessor getUrlAttribute
+            $media->url = $media->url;
+            $media->thumbnail = $media->thumbnail_url;
             return $media;
         });
 
-        return response()->json([
-            'status' => 'success',
-            'data' => $medias
-        ]);
+        return response()->json(['status' => 'success', 'data' => $medias]);
     }
 }
