@@ -61,20 +61,26 @@ services:
       - eveeze-network
 
   # 5. Create Default Bucket for MinIO (Optional helper)
+  # 5. Create Default Bucket (Fix for mc latest version)
   createbuckets:
     image: minio/mc
     depends_on:
       - minio
     entrypoint: >
       /bin/sh -c "
-      /usr/bin/mc config host add myminio http://minio:9000 ${AWS_ACCESS_KEY_ID} ${AWS_SECRET_ACCESS_KEY};
-      /usr/bin/mc mb myminio/${AWS_BUCKET};
-      /usr/bin/mc policy set public myminio/${AWS_BUCKET};
+      until /usr/bin/mc alias set myminio http://minio:9000 ${AWS_ACCESS_KEY_ID} ${AWS_SECRET_ACCESS_KEY}; do
+        echo 'MinIO belum siap... menunggu 1 detik...';
+        sleep 1;
+      done;
+      /usr/bin/mc mb myminio/${AWS_BUCKET} || true;
+      
+     
+      /usr/bin/mc anonymous set public myminio/${AWS_BUCKET};
+      echo 'Bucket berhasil diset Public!';
       exit 0;
       "
     networks:
       - eveeze-network
-
 networks:
   eveeze-network:
     driver: bridge

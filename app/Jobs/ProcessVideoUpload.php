@@ -16,8 +16,8 @@ class ProcessVideoUpload implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    // Timeout 30 menit (aman untuk video besar/lambat)
-    public $timeout = 1800; 
+    // Timeout 30 menit
+    public $timeout = 1800;
 
     public function __construct(protected Media $media) {}
 
@@ -25,10 +25,11 @@ class ProcessVideoUpload implements ShouldQueue
     {
         $this->media->update(['status' => 'processing']);
 
-        // 1. Setup Folder Temp
+        // Folder Temporary Lokal (Bukan S3)
         $tempId = $this->media->id . '_' . uniqid();
         $tempDir = storage_path('app/temp/' . $tempId);
         
+        // Pastikan direktori temp ada
         if (!File::exists($tempDir)) {
             File::makeDirectory($tempDir, 0777, true);
         }
@@ -38,24 +39,28 @@ class ProcessVideoUpload implements ShouldQueue
         $localPlaylistPath = $tempDir . '/' . $playlistName;
 
         try {
-            // 2. Download File dari Storage ke Temp
-            File::put($localRawPath, Storage::get($this->media->path_original));
+            // 1. Download file Raw dari S3/Local ke Folder Temp Server
+            // Menggunakan stream copy agar hemat memori
+            $srcStream = Storage::disk($this->getDiskFromPath($this->media->path_original))
+                            ->readStream($this->media->path_original);
+            $destStream = fopen($localRawPath, 'w');
+            stream_copy_to_stream($srcStream, $destStream);
+            fclose($srcStream);
+            fclose($destStream);
 
-            // 3. Ambil Durasi (ffprobe)
+            // 2. Ambil Durasi Video
             $probeCmd = "ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {$localRawPath}";
             $probeProcess = Process::fromShellCommandline($probeCmd);
             $probeProcess->run();
             $duration = (int) floatval($probeProcess->getOutput());
 
-            // 4. Konversi ke HLS (ffmpeg)
-            // -hls_time 10: Potongan 10 detik
-            // -hls_list_size 0: Simpan semua segmen
-            // -c:v libx264 -preset veryfast: Encoding cepat kompatibel
+            // 3. Konversi ke HLS (FFmpeg)
             $ffmpegCmd = [
                 'ffmpeg', '-y', '-i', $localRawPath,
                 '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
                 '-c:a', 'aac', '-b:a', '128k',
-                '-hls_time', '10', '-hls_playlist_type', 'vod', 
+                '-hls_time', '10', 
+                '-hls_playlist_type', 'vod', 
                 '-hls_segment_filename', $tempDir . '/segment_%03d.ts',
                 $localPlaylistPath
             ];
@@ -68,15 +73,15 @@ class ProcessVideoUpload implements ShouldQueue
                 throw new \Exception('FFmpeg failed: ' . $process->getErrorOutput());
             }
 
-            // 5. Upload ke Storage (Public)
+            // 4. Upload ke MinIO (S3) - Folder Public
             $s3Folder = 'hls/' . $this->media->id;
             $files = File::files($tempDir);
 
             foreach ($files as $file) {
                 if ($file->getFilename() === 'input.mp4') continue;
-                
-                // Gunakan putFileAs agar Content-Type otomatis terdeteksi
-                Storage::putFileAs(
+
+                // Explicitly use 's3' disk
+                Storage::disk('s3')->putFileAs(
                     $s3Folder, 
                     $file, 
                     $file->getFilename(), 
@@ -84,24 +89,29 @@ class ProcessVideoUpload implements ShouldQueue
                 );
             }
 
-            // 6. Cleanup & Update DB
-            // Hapus file raw original untuk hemat space (Opsional)
-            Storage::delete($this->media->path_original);
-
+            // 5. Update Database
             $this->media->update([
                 'status' => 'completed',
-                'path_optimized' => $s3Folder . '/' . $playlistName,
-                'path_original' => null,
+                // URL lengkap ke playlist
+                'path_optimized' => $s3Folder . '/' . $playlistName, 
+                // Opsional: path_original bisa diset null jika file raw dihapus
                 'duration' => $duration
             ]);
 
         } catch (\Exception $e) {
             $this->media->update(['status' => 'failed']);
-            \Log::error("Video Processing Error ID {$this->media->id}: " . $e->getMessage());
-            // Jangan throw exception agar queue worker tidak restart terus menerus untuk file corrupt
+            \Log::error("Video Processing Error [ID: {$this->media->id}]: " . $e->getMessage());
         } finally {
-            // Hapus folder temp lokal
+            // Cleanup folder temp lokal
             File::deleteDirectory($tempDir);
         }
+    }
+
+    /**
+     * Helper: Cek file raw ada di disk mana (s3 atau local)
+     */
+    protected function getDiskFromPath($path)
+    {
+        return Storage::disk('s3')->exists($path) ? 's3' : 'local';
     }
 }
