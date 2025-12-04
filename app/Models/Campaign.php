@@ -20,9 +20,10 @@ class Campaign extends Model
     ];
 
     protected $casts = [
-        'start_date' => 'date',
-        'end_date'   => 'date',
-        'total_cost' => 'decimal:2',
+    'user_id', 'name', 'start_date', 'end_date', 'total_cost', 
+    'status', 
+    'moderation_status',
+    'moderation_notes'  
     ];
 
     public function items()

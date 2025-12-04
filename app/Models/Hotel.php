@@ -22,6 +22,7 @@ class Hotel extends Model
         'contact_person',
         'contact_phone',
         'is_active', // Menambahkan field status
+        'star_rating'
     ];
 
     /**
