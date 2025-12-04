@@ -12,9 +12,8 @@ class AuthController extends Controller
 {
     /**
      * Register advertiser baru.
-     * SuperAdmin nanti dibuat via seeder / panel internal.
      */
-    public function registerAdvertiser(Request $request)
+    public function register(Request $request)
     {
         $validated = $request->validate([
             'name'     => ['required', 'string', 'max:255'],
@@ -38,8 +37,7 @@ class AuthController extends Controller
     }
 
     /**
-     * 🔑 Login umum (superadmin, advertiser, operator, dsb).
-     * Bedanya nanti di role + middleware, bukan di endpoint ini.
+     * Login user.
      */
     public function login(Request $request)
     {
@@ -48,7 +46,6 @@ class AuthController extends Controller
             'password' => ['required', 'string'],
         ]);
 
-        /** @var \App\Models\User|null $user */
         $user = User::where('email', $validated['email'])->first();
 
         if (! $user || ! Hash::check($validated['password'], $user->password)) {
@@ -57,7 +54,7 @@ class AuthController extends Controller
             ]);
         }
 
-        // optional: clear token lama biar rapih
+        // Hapus token lama agar bersih (opsional)
         $user->tokens()->delete();
 
         $token = $user->createToken('api')->plainTextToken;
@@ -69,7 +66,20 @@ class AuthController extends Controller
     }
 
     /**
-     * Info user yang lagi login (dipakai front-end buat cek role).
+     * Logout user (Hapus token).
+     */
+    public function logout(Request $request)
+    {
+        // Menghapus token yang sedang digunakan saat ini
+        $request->user()->currentAccessToken()->delete();
+
+        return response()->json([
+            'message' => 'Logged out successfully'
+        ]);
+    }
+
+    /**
+     * Info user login.
      */
     public function me(Request $request)
     {
