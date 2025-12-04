@@ -7,10 +7,6 @@ use App\Models\RateCard;
 
 class PricingService
 {
-    /**
-     * Hitung harga total.
-     * Prioritas: Screen Override -> Hotel Override -> Rate Card -> Default
-     */
     public function calculatePrice(Screen $screen, int $days, int $playsPerDay): float
     {
         // 1. Cek Override Level Screen
@@ -23,7 +19,7 @@ class PricingService
             return $screen->hotel->price_override * $playsPerDay * $days;
         }
 
-        // 3. Cek Rate Card (Berdasarkan Bintang Hotel)
+        // 3. Cek Rate Card
         $rate = RateCard::where('hotel_star_rating', $screen->hotel->star_rating)
             ->where('duration_days', '<=', $days)
             ->orderByDesc('duration_days')
@@ -31,10 +27,11 @@ class PricingService
 
         if ($rate) {
             $dailyRate = $rate->base_price / $rate->duration_days;
-            return $dailyRate * $days;
+            // [FIX] Dikali playsPerDay agar logikanya sama dengan override
+            return $dailyRate * $days * $playsPerDay; 
         }
 
-        // 4. Default Fallback
+        // 4. Default
         return 10000 * $playsPerDay * $days;
     }
 }

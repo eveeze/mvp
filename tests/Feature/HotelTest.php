@@ -6,61 +6,79 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
+// 1. Unauthenticated
 it('rejects access to /api/hotels for unauthenticated user', function () {
     $this->getJson('/api/hotels')->assertStatus(401);
 });
 
+// 2. Unauthorized (Advertiser)
 it('rejects access to /api/hotels for advertiser user', function () {
     $user = User::factory()->create(['role' => 'advertiser']);
-    
-    $this->actingAs($user)
-        ->getJson('/api/hotels')
-        ->assertStatus(403);
+    $this->actingAs($user)->getJson('/api/hotels')->assertStatus(403);
 });
 
-it('allows superadmin to create a hotel', function () {
+// 3. Create Hotel (Dengan Harga & Bintang)
+it('allows superadmin to create a hotel with pricing details', function () {
     $admin = User::factory()->superAdmin()->create();
 
     $response = $this->actingAs($admin)
         ->postJson('/api/hotels', [
-            'name' => 'Hotel Indonesia',
-            'city' => 'Jakarta',
-            'address' => 'Bundaran HI',
+            'name' => 'Luxury Hotel',
+            'city' => 'Bali',
+            'address' => 'Kuta',
             'contact_person' => 'Manager',
-            'contact_phone'  => '08123456789',
+            'contact_phone' => '08123',
+            // FITUR BARU HARI 1
+            'star_rating' => 5, 
+            'price_override' => 250000, 
+            'is_active' => true
         ]);
 
     $response
         ->assertCreated()
-        ->assertJsonStructure([
-            'data' => ['id', 'name', 'city', 'address'],
-        ]);
+        ->assertJsonPath('data.star_rating', 5)
+        ->assertJsonPath('data.price_override', '250000.00');        
+    $this->assertDatabaseHas('hotels', [
+        'name' => 'Luxury Hotel',
+        'star_rating' => 5,
+        'price_override' => 250000
+    ]);
 });
 
-it('allows superadmin to list, update and delete hotels', function () {
-    // 1. Bersihkan Data Lama (PENTING: forceDelete untuk bypass soft deletes)
-    Hotel::query()->forceDelete();
-
+// 4. List Hotels
+it('allows superadmin to list hotels', function () {
+    Hotel::query()->forceDelete(); // Bersihkan DB
     $admin = User::factory()->superAdmin()->create();
-    $hotel = Hotel::factory()->create();
+    Hotel::factory()->create();
 
-    // List
-    // Karena pakai paginate, data hotel ada di 'data.data'
     $this->actingAs($admin)
         ->getJson('/api/hotels')
         ->assertOk()
-        ->assertJsonCount(1, 'data.data'); 
+        ->assertJsonCount(1, 'data.data');
+});
 
-    // Update
+// 5. Update Hotel
+it('allows superadmin to update hotel details', function () {
+    $admin = User::factory()->superAdmin()->create();
+    $hotel = Hotel::factory()->create();
+
     $this->actingAs($admin)
-        ->putJson("/api/hotels/{$hotel->id}", ['name' => 'Updated Hotel'])
+        ->putJson("/api/hotels/{$hotel->id}", [
+            'name' => 'Updated Name',
+            'star_rating' => 4 // Update bintang
+        ])
         ->assertOk()
-        ->assertJsonPath('data.name', 'Updated Hotel');
+        ->assertJsonPath('data.star_rating', 4);
+});
 
-    // Delete
+// 6. Delete Hotel
+it('allows superadmin to delete hotel', function () {
+    $admin = User::factory()->superAdmin()->create();
+    $hotel = Hotel::factory()->create();
+
     $this->actingAs($admin)
         ->deleteJson("/api/hotels/{$hotel->id}")
         ->assertOk();
-        
+
     $this->assertSoftDeleted('hotels', ['id' => $hotel->id]);
 });
