@@ -22,7 +22,9 @@ class Screen extends Model
         'max_plays_per_day',
         'max_duration_sec',
         'is_active',          
-        'is_online',          
+        'is_online',
+        // [BARU] Timestamp terakhir online          
+        'last_seen_at',
         'allowed_categories',
     ];
 
@@ -35,6 +37,7 @@ class Screen extends Model
         'resolution_height'  => 'integer',
         'max_plays_per_day'  => 'integer',
         'max_duration_sec'   => 'integer',
+        'last_seen_at'       => 'datetime', // Casting ke Carbon
     ];
 
     public function scopeActive($query)

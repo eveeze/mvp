@@ -13,7 +13,7 @@ use App\Http\Controllers\Api\CallbackController;
 use App\Http\Controllers\Api\CampaignController;
 use App\Http\Controllers\Api\PlayerController;
 use App\Http\Controllers\Api\DashboardController;
-use App\Http\Controllers\Api\AdminMediaController; // [NEW]
+use App\Http\Controllers\Api\AdminMediaController;
 
 /*
 |--------------------------------------------------------------------------
@@ -25,59 +25,53 @@ use App\Http\Controllers\Api\AdminMediaController; // [NEW]
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 
-// Midtrans Callback (Wajib Public agar bisa ditembak Midtrans)
+// Midtrans Callback
 Route::post('/callback/midtrans', [CallbackController::class, 'handleMidtrans']);
 
-// === PLAYER / IOT ROUTES ===
-// Diakses oleh TV/Videotron (Menggunakan Device ID)
+// === PLAYER / IOT ROUTES (Device Auth via Device ID) ===
 Route::prefix('player')->group(function () {
+    
+    // 1. Tarik Playlist Harian
     Route::get('/playlist', [PlayerController::class, 'getPlaylist']);
-    Route::post('/heartbeat', [PlayerController::class, 'heartbeat']);
+    
+    // 2. Lapor Kesehatan (Heartbeat/Telemetry)
+    Route::post('/telemetry', [PlayerController::class, 'telemetry']);
+    
+    // 3. Lapor Bukti Tayang (Proof of Play)
+    Route::post('/logs/impression', [PlayerController::class, 'storeImpression']);
+    
 });
 
 /*
 |--------------------------------------------------------------------------
-| Protected Routes (Harus Login: Admin / Advertiser)
+| Protected Routes (Harus Login)
 |--------------------------------------------------------------------------
 */
 Route::middleware('auth:sanctum')->group(function () {
     
-    // Global User Info & Logout
+    // Global
     Route::get('/user', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::put('/profile', [DashboardController::class, 'updateProfile']);
 
-    // === ROLE: SUPER ADMIN ===
+    // Super Admin
     Route::middleware('role:super_admin')->group(function () {
-        // Manajemen Hotel & Screen
         Route::apiResource('hotels', HotelController::class);
         Route::apiResource('hotels.screens', ScreenController::class);
         
-        // [NEW] Moderasi Media
-        Route::get('/admin/media', [AdminMediaController::class, 'index']); // List Pending
-        Route::put('/admin/media/{id}/approve', [AdminMediaController::class, 'approve']); // Approve
-        Route::put('/admin/media/{id}/reject', [AdminMediaController::class, 'reject']); // Reject
+        Route::get('/admin/media', [AdminMediaController::class, 'index']);
+        Route::put('/admin/media/{id}/approve', [AdminMediaController::class, 'approve']);
+        Route::put('/admin/media/{id}/reject', [AdminMediaController::class, 'reject']);
     });
 
-    // === ROLE: ADVERTISER ===
+    // Advertiser
     Route::middleware('role:advertiser')->group(function () {
-        
-        // Dashboard Stats
         Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
-
-        // 1. Finance (Deposit & Wallet)
         Route::post('/deposits', [DepositController::class, 'store']);
         Route::get('/deposits', [DepositController::class, 'index']);
-        
-        // 2. Asset Management (Video/Image Upload)
-        Route::post('/media', [MediaController::class, 'store']); // Upload (Single Door)
-        Route::get('/media', [MediaController::class, 'index']);  // List Status
-        
-        // 3. Campaign / Booking (Core Business)
-        Route::apiResource('campaigns', CampaignController::class)
-             ->only(['index', 'store', 'show']);
-             
-        // Advertiser bisa melihat list screen untuk memilih (Read Only)
+        Route::post('/media', [MediaController::class, 'store']);
+        Route::get('/media', [MediaController::class, 'index']);
+        Route::apiResource('campaigns', CampaignController::class)->only(['index', 'store', 'show']);
         Route::get('/public/screens', [ScreenController::class, 'index']); 
     });
 

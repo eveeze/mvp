@@ -4,53 +4,52 @@ use App\Models\Screen;
 use App\Models\Campaign;
 use App\Models\User;
 use App\Models\Media;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 
-it('returns playlist for active campaign today', function () {
-    // 1. Setup Screen
-    $screen = Screen::factory()->create(['code' => 'SCREEN-001', 'is_active' => true]);
-    
-    // 2. Setup Campaign AKTIF HARI INI
+uses(RefreshDatabase::class);
+
+it('returns playlist ONLY for ACTIVE campaigns and APPROVED media', function () {
+    $screen = Screen::factory()->create(['code' => 'SCR-PLAY-TEST', 'is_active' => true]);
     $user = User::factory()->create();
-    $media = Media::factory()->create(['status' => 'completed', 'user_id' => $user->id]);
     
-    $campaign = Campaign::factory()->create([
-        'user_id' => $user->id,
-        'start_date' => now()->toDateString(), // Hari ini
-        'end_date' => now()->addDays(5)->toDateString(),
-        'status' => 'active'
-    ]);
+    // Media Approved
+    $mediaApproved = Media::factory()->create(['status' => 'completed', 'moderation_status' => 'approved', 'user_id' => $user->id]);
+    // Media Pending
+    $mediaPending = Media::factory()->create(['status' => 'completed', 'moderation_status' => 'pending', 'user_id' => $user->id]);
+
+    // Campaign 1: Active & Approved Media -> HARUS MUNCUL
+    $c1 = Campaign::factory()->create(['user_id' => $user->id, 'start_date' => now(), 'end_date' => now(), 'status' => 'active']);
+    $c1->items()->create(['screen_id' => $screen->id, 'media_id' => $mediaApproved->id, 'plays_per_day' => 10, 'price_per_play' => 100]);
+
+    // Campaign 2: Active TAPI Media Pending -> TIDAK BOLEH MUNCUL
+    $c2 = Campaign::factory()->create(['user_id' => $user->id, 'start_date' => now(), 'end_date' => now(), 'status' => 'active']);
+    $c2->items()->create(['screen_id' => $screen->id, 'media_id' => $mediaPending->id, 'plays_per_day' => 10, 'price_per_play' => 100]);
+
+    // Campaign 3: Pending Review -> TIDAK BOLEH MUNCUL
+    $c3 = Campaign::factory()->create(['user_id' => $user->id, 'start_date' => now(), 'end_date' => now(), 'status' => 'pending_review']);
+    $c3->items()->create(['screen_id' => $screen->id, 'media_id' => $mediaApproved->id, 'plays_per_day' => 10, 'price_per_play' => 100]);
+
+    $response = $this->getJson('/api/player/playlist?device_id=SCR-PLAY-TEST');
+
+    $response->assertOk();
     
-    $campaign->items()->create([
-        'screen_id' => $screen->id,
-        'media_id' => $media->id,
-        'plays_per_day' => 100,
-        'price_per_play' => 1000
-    ]);
-
-    // 3. Hit Endpoint Player
-    $response = $this->getJson('/api/player/playlist?device_id=SCREEN-001');
-
-    $response->assertOk()
-        ->assertJsonStructure(['playlist' => [['url', 'title', 'duration']]]);
-        
-    // Pastikan media ada di playlist
+    // Hanya c1 yang boleh lolos
     $playlist = $response->json('playlist');
     expect($playlist)->toHaveCount(1);
-    expect($playlist[0]['media_id'])->toBe($media->id);
+    expect($playlist[0]['campaign_id'])->toBe($c1->id);
 });
 
 it('returns empty playlist if no active campaign', function () {
-    $screen = Screen::factory()->create(['code' => 'SCREEN-002']);
+    $screen = Screen::factory()->create(['code' => 'SCR-EMPTY']);
 
     // Campaign masa depan (Besok)
-    $campaign = Campaign::factory()->create([
+    Campaign::factory()->create([
         'start_date' => now()->addDay(), 
         'end_date' => now()->addDays(5),
         'status' => 'active'
     ]);
-    // ... item created ...
 
-    $response = $this->getJson('/api/player/playlist?device_id=SCREEN-002');
+    $response = $this->getJson('/api/player/playlist?device_id=SCR-EMPTY');
 
     $response->assertOk();
     expect($response->json('playlist'))->toBeEmpty();
