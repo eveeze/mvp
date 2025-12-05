@@ -13,17 +13,17 @@ class Media extends Model
 
     protected $fillable = [
         'user_id', 
-        'type', // Baru
+        'type', 
         'file_name', 
         'mime_type', 
         'size', 
         'duration',
         'path_original', 
         'path_optimized', 
-        'thumbnail_path', // Baru
-        'status', // processing status
-        'moderation_status', // Baru: pending, approved, rejected
-        'moderation_notes' // Baru
+        'thumbnail_path', 
+        'status', 
+        'moderation_status', 
+        'moderation_notes'
     ];
 
     /**
@@ -38,13 +38,19 @@ class Media extends Model
     }
 
     /**
-     * URL Thumbnail (Untuk CMS)
+     * URL Thumbnail
      */
     public function getThumbnailUrlAttribute()
     {
         if ($this->thumbnail_path) {
             return Storage::disk('s3')->url($this->thumbnail_path);
         }
-        return null; // Bisa diganti dengan URL placeholder default
+        return null;
+    }
+
+    // [FIX] Tambahkan Relasi User
+    public function user()
+    {
+        return $this->belongsTo(User::class);
     }
 }

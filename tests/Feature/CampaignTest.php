@@ -14,7 +14,15 @@ uses(RefreshDatabase::class);
 beforeEach(function () {
     $this->user = User::factory()->create(['role' => 'advertiser']);
     Wallet::create(['user_id' => $this->user->id, 'balance' => 5000000]);
-    $this->media = Media::factory()->create(['user_id' => $this->user->id, 'status' => 'completed', 'duration' => 15]);
+    
+    // [UPDATE] Gunakan state ->approved() agar lolos validasi moderasi
+    // Pastikan Anda sudah menambahkan method 'approved' di MediaFactory (lihat langkah 4)
+    $this->media = Media::factory()->create([
+        'user_id' => $this->user->id,
+        'status' => 'completed',
+        'duration' => 15,
+        'moderation_status' => 'approved' // Penting!
+    ]);
 });
 
 it('calculates cost using Rate Card when no overrides set', function () {
@@ -52,19 +60,17 @@ it('fails if wallet balance insufficient', function () {
 });
 
 it('fails if screen overbooked', function () {
-    // 1. Setup Screen Kapasitas 10
     $screen = Screen::factory()->create(['max_plays_per_day' => 10]);
     $date = now()->addDays(2)->toDateString();
 
-    // 2. Buat Campaign A (Penuh - 10 slot)
-    // Kita create manual untuk memastikan data ada di DB
     $c = Campaign::create([
         'user_id' => $this->user->id,
         'name' => 'Existing Campaign',
         'start_date' => $date, 
         'end_date' => $date, 
         'status' => 'active',
-        'total_cost' => 0
+        'total_cost' => 0,
+        'moderation_status' => 'approved'
     ]);
     
     CampaignItem::create([
@@ -75,8 +81,6 @@ it('fails if screen overbooked', function () {
         'price_per_play' => 1000
     ]);
 
-    // 3. Coba Buat Campaign B (Minta 1 slot lagi)
-    // Total 10 + 1 = 11 > 10 -> Harusnya Gagal (422)
     $response = $this->actingAs($this->user)
         ->postJson('/api/campaigns', [
             'name' => 'Overbook Request',
@@ -88,4 +92,27 @@ it('fails if screen overbooked', function () {
         
     $response->assertStatus(422)
              ->assertJsonFragment(['screens' => ["Screen '{$screen->name}' penuh. Sisa slot: 0."]]);
+});
+
+// [TAMBAHAN TEST CASE BARU]
+it('fails to create campaign if media is not approved', function () {
+    // Buat media baru yang statusnya PENDING
+    $pendingMedia = Media::factory()->create([
+        'user_id' => $this->user->id,
+        'status' => 'completed',
+        'moderation_status' => 'pending' // Belum diapprove admin
+    ]);
+
+    $screen = Screen::factory()->create(['price_per_play' => 10000, 'max_duration_sec' => 60]);
+
+    $this->actingAs($this->user)
+        ->postJson('/api/campaigns', [
+            'name' => 'Illegal Campaign',
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->toDateString(),
+            'media_id' => $pendingMedia->id,
+            'screens' => [['id' => $screen->id, 'plays_per_day' => 10]]
+        ])
+        ->assertStatus(422)
+        ->assertJsonFragment(['message' => 'Media belum disetujui oleh Admin.']);
 });
