@@ -13,7 +13,7 @@ use App\Http\Controllers\Api\CallbackController;
 use App\Http\Controllers\Api\CampaignController;
 use App\Http\Controllers\Api\PlayerController;
 use App\Http\Controllers\Api\DashboardController;
-use App\Http\Controllers\Api\AdminMediaController; // [BARU] Import Controller Moderasi
+use App\Http\Controllers\Api\AdminMediaController; // [NEW]
 
 /*
 |--------------------------------------------------------------------------
@@ -53,8 +53,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('hotels', HotelController::class);
         Route::apiResource('hotels.screens', ScreenController::class);
         
-        // [BARU] Media Moderation Routes
-        Route::get('/admin/media', [AdminMediaController::class, 'index']); // List pending
+        // [NEW] Moderasi Media
+        Route::get('/admin/media', [AdminMediaController::class, 'index']); // List Pending
         Route::put('/admin/media/{id}/approve', [AdminMediaController::class, 'approve']); // Approve
         Route::put('/admin/media/{id}/reject', [AdminMediaController::class, 'reject']); // Reject
     });
@@ -70,7 +70,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/deposits', [DepositController::class, 'index']);
         
         // 2. Asset Management (Video/Image Upload)
-        Route::post('/media', [MediaController::class, 'store']); // Upload
+        Route::post('/media', [MediaController::class, 'store']); // Upload (Single Door)
         Route::get('/media', [MediaController::class, 'index']);  // List Status
         
         // 3. Campaign / Booking (Core Business)

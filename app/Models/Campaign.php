@@ -16,14 +16,14 @@ class Campaign extends Model
         'start_date', 
         'end_date', 
         'total_cost', 
-        'status'
+        'status', // pending_review, active, rejected, finished
+        'moderation_status', // approved (dari media)
     ];
 
     protected $casts = [
-    'user_id', 'name', 'start_date', 'end_date', 'total_cost', 
-    'status', 
-    'moderation_status',
-    'moderation_notes'  
+        'start_date' => 'date',
+        'end_date'   => 'date',
+        'total_cost' => 'decimal:2',
     ];
 
     public function items()
@@ -34,5 +34,11 @@ class Campaign extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    // Relasi ke Transaksi (Campaign bisa punya banyak transaksi: Pembayaran & Refund)
+    public function transactions()
+    {
+        return $this->morphMany(Transaction::class, 'reference');
     }
 }

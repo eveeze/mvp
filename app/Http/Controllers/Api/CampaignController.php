@@ -25,12 +25,9 @@ class CampaignController extends Controller
         $this->pricingService = $pricingService;
     }
 
-    /**
-     * Store a newly created campaign in storage.
-     */
     public function store(Request $request)
     {
-        // 1. Validasi Input Request
+        // 1. Validasi Input
         $request->validate([
             'name'        => 'required|string|max:255',
             'start_date'  => 'required|date|after_or_equal:today',
@@ -51,22 +48,19 @@ class CampaignController extends Controller
             ->where('user_id', $user->id)
             ->first();
 
-        // A. Cek Keberadaan
         if (!$media) {
-            return response()->json(['message' => 'Media not found or not owned by user.'], 422);
+            return response()->json(['message' => 'Media not found.'], 422);
         }
-
-        // B. Cek Status Teknis (Processing)
+        
         if ($media->status !== 'completed') {
-            return response()->json(['message' => 'Media is still processing/failed. Please wait.'], 422);
+            return response()->json(['message' => 'Media processing not finished.'], 422);
         }
 
-        // C. [BARU] Cek Status Moderasi (Admin Approval)
         if ($media->moderation_status !== 'approved') {
             return response()->json([
                 'message' => 'Media belum disetujui oleh Admin.',
-                'moderation_status' => $media->moderation_status,
-                'reason' => $media->moderation_notes // Tampilkan alasan penolakan jika ada
+                'status' => $media->moderation_status,
+                'notes' => $media->moderation_notes
             ], 422);
         }
 
@@ -78,32 +72,23 @@ class CampaignController extends Controller
                 $campaignItemsData = [];
 
                 foreach ($request->screens as $item) {
-                    // Lock screen row
                     $screen = Screen::with('hotel')
                                 ->where('id', $item['id'])
                                 ->lockForUpdate() 
                                 ->first();
 
-                    // Validasi Screen Aktif
                     if (!$screen->is_active) {
-                        throw ValidationException::withMessages([
-                            'screens' => "Screen '{$screen->name}' sedang tidak aktif."
-                        ]);
+                        throw ValidationException::withMessages(['screens' => "Screen inactive."]);
                     }
-
-                    // Validasi Durasi Video vs Screen Rule
                     if ($media->duration > $screen->max_duration_sec) {
-                        throw ValidationException::withMessages([
-                            'media' => "Durasi media ({$media->duration}s) melebihi batas screen '{$screen->name}' ({$screen->max_duration_sec}s)."
-                        ]);
+                        throw ValidationException::withMessages(['media' => "Media too long."]);
                     }
 
                     // 4. Cek Kapasitas (Inventory Check)
                     $existingUsage = CampaignItem::where('screen_id', $screen->id)
                         ->whereHas('campaign', function ($query) use ($startDate, $endDate) {
-                            $query->where('status', 'active')
+                            $query->whereIn('status', ['active', 'pending_review']) // Cek yang pending juga
                                   ->where(function ($q) use ($startDate, $endDate) {
-                                      // Overlap check: (StartA <= EndB) and (EndA >= StartB)
                                       $q->whereDate('start_date', '<=', $endDate)
                                         ->whereDate('end_date', '>=', $startDate);
                                   });
@@ -111,17 +96,17 @@ class CampaignController extends Controller
                         ->sum('plays_per_day');
 
                     $requestedPlays = $item['plays_per_day'];
-                    
+                    $sisaSlot = max(0, $screen->max_plays_per_day - $existingUsage);
+
                     if (($existingUsage + $requestedPlays) > $screen->max_plays_per_day) {
-                        $sisa = max(0, $screen->max_plays_per_day - $existingUsage);
                         throw ValidationException::withMessages([
-                            'screens' => "Screen '{$screen->name}' penuh. Sisa slot: {$sisa}."
+                            'screens' => "Screen '{$screen->name}' penuh. Sisa slot: {$sisaSlot}."
                         ]);
                     }
 
-                    // 5. Hitung Biaya (PricingService)
+                    // 5. Hitung Biaya
                     $itemTotalCost = $this->pricingService->calculatePrice($screen, $days, $requestedPlays);
-                    $priceSnapshot = $itemTotalCost / ($requestedPlays * $days); // Harga satuan
+                    $priceSnapshot = $itemTotalCost / ($requestedPlays * $days);
 
                     $totalCost += $itemTotalCost;
 
@@ -134,25 +119,32 @@ class CampaignController extends Controller
                     ];
                 }
 
-                // 6. Potong Saldo Wallet
-                if (!$this->walletService->debitBalance($user, $totalCost)) {
-                    throw ValidationException::withMessages([
-                        'balance' => 'Saldo Wallet tidak mencukupi. Total tagihan: ' . number_format($totalCost)
-                    ]);
-                }
-
-                // 7. Simpan Data Campaign
+                // 6. Simpan Header Campaign DULU (agar punya ID untuk referensi transaksi)
                 $campaign = Campaign::create([
                     'user_id'    => $user->id,
                     'name'       => $request->name,
                     'start_date' => $startDate,
                     'end_date'   => $endDate,
                     'total_cost' => $totalCost,
-                    'status'     => 'active',
-                    'moderation_status' => 'approved', // Campaign otomatis approved jika medianya sudah approved (untuk fase ini)
+                    'status'     => 'pending_review', // [UPDATE HARI 3]
+                    'moderation_status' => 'approved', 
                 ]);
 
                 $campaign->items()->createMany($campaignItemsData);
+
+                // 7. Potong Saldo Wallet (Wajib kirim 3 argumen: User, Amount, Description, [Reference])
+                $balanceOk = $this->walletService->debitBalance(
+                    $user, 
+                    $totalCost, 
+                    "Booking Campaign #{$campaign->id}", // [FIX] Argumen ke-3 Wajib
+                    $campaign // Argumen ke-4 (Reference)
+                );
+                
+                if (!$balanceOk) {
+                    throw ValidationException::withMessages([
+                        'balance' => 'Saldo Wallet tidak mencukupi. Total tagihan: ' . number_format($totalCost)
+                    ]);
+                }
 
                 return $campaign;
             });
@@ -173,28 +165,20 @@ class CampaignController extends Controller
         }
     }
 
-    /**
-     * List campaigns for the authenticated user.
-     */
+    // ... Index & Show methods (sama)
     public function index(Request $request)
     {
         $campaigns = Campaign::with(['items.screen', 'items.media'])
             ->where('user_id', $request->user()->id)
-            ->latest()
-            ->paginate(10);
-
+            ->latest()->paginate(10);
         return response()->json(['data' => $campaigns]);
     }
 
-    /**
-     * Show specific campaign details.
-     */
     public function show(Request $request, $id)
     {
         $campaign = Campaign::with(['items.screen', 'items.media'])
             ->where('user_id', $request->user()->id)
             ->findOrFail($id);
-
         return response()->json(['data' => $campaign]);
     }
 }

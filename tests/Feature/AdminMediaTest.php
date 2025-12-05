@@ -6,6 +6,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
+// 1. Superadmin bisa melihat daftar media 'pending'
 it('allows superadmin to list pending media', function () {
     $admin = User::factory()->superAdmin()->create();
     
@@ -17,16 +18,18 @@ it('allows superadmin to list pending media', function () {
         ->getJson('/api/admin/media?status=pending');
 
     $response->assertOk()
-             ->assertJsonCount(2, 'data.data'); // Harus cuma 2 yang muncul
+             ->assertJsonCount(2, 'data.data'); // Hanya 2 yang pending
 });
 
+// 2. Superadmin bisa menyetujui (approve) media
 it('allows superadmin to approve media', function () {
     $admin = User::factory()->superAdmin()->create();
     $media = Media::factory()->create(['moderation_status' => 'pending']);
 
     $this->actingAs($admin)
         ->putJson("/api/admin/media/{$media->id}/approve")
-        ->assertOk();
+        ->assertOk()
+        ->assertJson(['message' => 'Media approved.']);
 
     $this->assertDatabaseHas('media', [
         'id' => $media->id,
@@ -34,6 +37,7 @@ it('allows superadmin to approve media', function () {
     ]);
 });
 
+// 3. Superadmin bisa menolak (reject) media dengan alasan
 it('allows superadmin to reject media with reason', function () {
     $admin = User::factory()->superAdmin()->create();
     $media = Media::factory()->create(['moderation_status' => 'pending']);
@@ -51,11 +55,12 @@ it('allows superadmin to reject media with reason', function () {
     ]);
 });
 
+// 4. Advertiser TIDAK boleh mengakses fitur ini
 it('forbids advertiser from accessing moderation endpoints', function () {
     $advertiser = User::factory()->create(['role' => 'advertiser']);
     $media = Media::factory()->create();
 
     $this->actingAs($advertiser)
         ->putJson("/api/admin/media/{$media->id}/approve")
-        ->assertStatus(403);
+        ->assertStatus(403); // Forbidden
 });
