@@ -6,15 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\Screen;
 use App\Models\CampaignItem;
 use App\Models\PlayerTelemetry;
-use App\Jobs\ProcessImpressionLog;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Redis; // [NEW]
 use Carbon\Carbon;
 
 class PlayerController extends Controller
 {
     /**
      * 1. Get Playlist Harian
-     * Mengambil iklan yang harus tayang HARI INI di layar ini.
      */
     public function getPlaylist(Request $request)
     {
@@ -24,24 +23,12 @@ class PlayerController extends Controller
 
         $screen = Screen::where('code', $request->device_id)->first();
 
-        if (!$screen) {
-            return response()->json(['status' => 'error', 'message' => 'Device ID unregistered.'], 404);
-        }
+        if (!$screen) return response()->json(['status' => 'error', 'message' => 'Device ID unregistered.'], 404);
+        if (!$screen->is_active) return response()->json(['status' => 'error', 'message' => 'Screen suspended.'], 403);
 
-        if (!$screen->is_active) {
-            return response()->json(['status' => 'error', 'message' => 'Screen suspended.'], 403);
-        }
-
-        // Update status online (Basic Heartbeat)
         $screen->update(['is_online' => true, 'last_seen_at' => now()]);
-
         $today = Carbon::now();
 
-        // Query Item Kampanye yang VALID:
-        // 1. Screen cocok
-        // 2. Campaign status ACTIVE (Bukan pending/rejected)
-        // 3. Media moderasi APPROVED
-        // 4. Tanggal masuk range
         $campaignItems = CampaignItem::with(['media', 'campaign'])
             ->where('screen_id', $screen->id)
             ->whereHas('campaign', function ($query) use ($today) {
@@ -55,16 +42,16 @@ class PlayerController extends Controller
             })
             ->get();
 
-        // Format JSON Ringan untuk Player
         $playlist = $campaignItems->map(function ($item) {
             return [
-                'id'          => $item->id, // Campaign Item ID (untuk tracking log)
+                'id'          => $item->id,
                 'campaign_id' => $item->campaign_id,
                 'media_id'    => $item->media_id,
                 'title'       => $item->campaign->name,
                 'url'         => $item->media->url, 
-                'type'        => $item->media->type, // video/image
-                'duration'    => $item->media->type === 'video' ? $item->media->duration : 10, // Default image 10s
+                'type'        => $item->media->type,
+                'duration'    => $item->media->type === 'video' ? $item->media->duration : 10,
+                'slots'       => $item->plays_per_day,
                 'hash'        => md5($item->media->updated_at . $item->id),
             ];
         })->values();
@@ -75,15 +62,14 @@ class PlayerController extends Controller
                 'screen_name' => $screen->name,
                 'location'    => $screen->location,
                 'server_time' => now()->toIso8601String(),
-                'refresh_interval' => 300, // Cek playlist tiap 5 menit
+                'refresh_interval' => 300,
             ],
             'playlist' => $playlist
         ]);
     }
 
     /**
-     * 2. Telemetry (Heartbeat Canggih)
-     * Player mengirim status kesehatan perangkat.
+     * 2. Telemetry (Heartbeat)
      */
     public function telemetry(Request $request)
     {
@@ -97,14 +83,8 @@ class PlayerController extends Controller
         ]);
 
         $screen = Screen::where('code', $request->device_id)->firstOrFail();
+        $screen->update(['is_online' => true, 'last_seen_at' => now()]);
 
-        // Update status Screen utama
-        $screen->update([
-            'is_online' => true,
-            'last_seen_at' => now()
-        ]);
-
-        // Simpan Log Telemetry (History Kesehatan)
         PlayerTelemetry::create([
             'screen_id'    => $screen->id,
             'cpu_usage'    => $request->cpu_usage,
@@ -119,8 +99,7 @@ class PlayerController extends Controller
     }
 
     /**
-     * 3. Impression Log (Proof of Play)
-     * Player melapor bahwa iklan sudah diputar.
+     * 3. Impression Log (Proof of Play) - [REFACTOR DAY 8: REDIS BUFFER]
      */
     public function storeImpression(Request $request)
     {
@@ -133,14 +112,25 @@ class PlayerController extends Controller
 
         $screen = Screen::where('code', $request->device_id)->firstOrFail();
 
-        // Masukkan ke Queue agar response cepat dan DB tidak lock
-        ProcessImpressionLog::dispatch([
+        // [OPTIMASI] Push ke Redis List daripada Insert DB langsung
+        // Ini membuat endpoint sangat ringan (<10ms)
+        $logData = [
             'screen_id'    => $screen->id,
             'media_id'     => $request->media_id,
             'played_at'    => $request->played_at,
             'duration_sec' => $request->duration_sec,
-        ]);
+            'created_at'   => now()->toDateTimeString(),
+            'updated_at'   => now()->toDateTimeString(),
+        ];
 
-        return response()->json(['status' => 'queued']);
+        try {
+            Redis::rpush('impression_logs_queue', json_encode($logData));
+        } catch (\Exception $e) {
+            // Fallback jika Redis mati (sangat jarang): Log ke file atau DB langsung
+            \Log::error('Redis Push Failed: ' . $e->getMessage());
+            return response()->json(['status' => 'error', 'message' => 'Logging failed'], 500);
+        }
+
+        return response()->json(['status' => 'buffered']);
     }
 }

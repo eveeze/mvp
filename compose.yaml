@@ -10,8 +10,13 @@ services:
     working_dir: /var/www
     volumes:
       - ./:/var/www
+    depends_on:
+      - db
+      - redis # [BARU]
     networks:
       - eveeze-network
+    environment:
+      - REDIS_HOST=redis
 
   # 2. Web Server (Nginx)
   nginx:
@@ -60,8 +65,7 @@ services:
     networks:
       - eveeze-network
 
-  # 5. Create Default Bucket for MinIO (Optional helper)
-  # 5. Create Default Bucket (Fix for mc latest version)
+  # 5. Create Default Bucket (MinIO Helper)
   createbuckets:
     image: minio/mc
     depends_on:
@@ -73,14 +77,24 @@ services:
         sleep 1;
       done;
       /usr/bin/mc mb myminio/${AWS_BUCKET} || true;
-      
-     
       /usr/bin/mc anonymous set public myminio/${AWS_BUCKET};
-      echo 'Bucket berhasil diset Public!';
       exit 0;
       "
     networks:
       - eveeze-network
+
+  # 6. [BARU] Redis (In-Memory Cache & Buffer)
+  redis:
+    image: redis:alpine
+    container_name: eveeze_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - eveeze-network
+
 networks:
   eveeze-network:
     driver: bridge
@@ -88,3 +102,4 @@ networks:
 volumes:
   db-data:
   minio-data:
+  redis-data: # [BARU]
