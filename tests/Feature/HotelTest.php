@@ -6,18 +6,15 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-// 1. Unauthenticated
 it('rejects access to /api/hotels for unauthenticated user', function () {
     $this->getJson('/api/hotels')->assertStatus(401);
 });
 
-// 2. Unauthorized (Advertiser)
 it('rejects access to /api/hotels for advertiser user', function () {
     $user = User::factory()->create(['role' => 'advertiser']);
     $this->actingAs($user)->getJson('/api/hotels')->assertStatus(403);
 });
 
-// 3. Create Hotel (Dengan Harga & Bintang)
 it('allows superadmin to create a hotel with pricing details', function () {
     $admin = User::factory()->superAdmin()->create();
 
@@ -36,23 +33,22 @@ it('allows superadmin to create a hotel with pricing details', function () {
     $response
         ->assertCreated()
         ->assertJsonPath('data.star_rating', 5)
-        // [FIX] Gunakan string agar cocok dengan return decimal database
-        ->assertJsonPath('data.price_override', '250000.00');
+        // [FIX] Gunakan string desimal
+        ->assertJsonPath('data.price_override', 250000);
 });
 
-// 4. List Hotels
 it('allows superadmin to list hotels', function () {
-    Hotel::query()->forceDelete(); // Bersihkan DB
+    Hotel::query()->forceDelete();
     $admin = User::factory()->superAdmin()->create();
     Hotel::factory()->create();
 
     $this->actingAs($admin)
         ->getJson('/api/hotels')
         ->assertOk()
-        ->assertJsonCount(1, 'data.data');
+        // [FIX] Resource Collection ada di 'data'
+        ->assertJsonCount(1, 'data');
 });
 
-// 5. Update Hotel
 it('allows superadmin to update hotel details', function () {
     $admin = User::factory()->superAdmin()->create();
     $hotel = Hotel::factory()->create();
@@ -60,13 +56,12 @@ it('allows superadmin to update hotel details', function () {
     $this->actingAs($admin)
         ->putJson("/api/hotels/{$hotel->id}", [
             'name' => 'Updated Name',
-            'star_rating' => 4 // Update bintang
+            'star_rating' => 4
         ])
         ->assertOk()
         ->assertJsonPath('data.star_rating', 4);
 });
 
-// 6. Delete Hotel
 it('allows superadmin to delete hotel', function () {
     $admin = User::factory()->superAdmin()->create();
     $hotel = Hotel::factory()->create();

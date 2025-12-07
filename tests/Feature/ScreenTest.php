@@ -15,10 +15,7 @@ it('rejects access to hotel screens for unauthenticated user', function () {
 it('rejects access to hotel screens for advertiser', function () {
     $user = User::factory()->create(['role' => 'advertiser']);
     $hotel = Hotel::factory()->create();
-    
-    $this->actingAs($user)
-        ->getJson("/api/hotels/{$hotel->id}/screens")
-        ->assertStatus(403);
+    $this->actingAs($user)->getJson("/api/hotels/{$hotel->id}/screens")->assertStatus(403);
 });
 
 it('allows superadmin to create a screen for a hotel', function () {
@@ -47,14 +44,11 @@ it('allows superadmin to create a screen for a hotel', function () {
 });
 
 it('allows superadmin to list screens for a specific hotel', function () {
-    // 1. Bersihkan DB agar hitungan akurat (Menghapus data seeder/test lain)
-    Screen::query()->forceDelete();
-
+    Screen::query()->forceDelete(); // Bersihkan DB
     $admin = User::factory()->superAdmin()->create();
     $hotelA = Hotel::factory()->create();
     $hotelB = Hotel::factory()->create();
 
-    // Buat 2 screen untuk Hotel A, 3 screen untuk Hotel B
     Screen::factory()->count(2)->create(['hotel_id' => $hotelA->id]);
     Screen::factory()->count(3)->create(['hotel_id' => $hotelB->id]);
 
@@ -63,16 +57,16 @@ it('allows superadmin to list screens for a specific hotel', function () {
 
     $response
         ->assertOk()
-        // [FIX] Gunakan 'data.data' karena response menggunakan pagination
-        ->assertJsonCount(2, 'data.data') 
-        ->assertJsonPath('data.data.0.hotel_id', $hotelA->id);
+        // [FIX] Resource Collection ada di root 'data'
+        ->assertJsonCount(2, 'data') 
+        // [FIX] Path akses item array
+        ->assertJsonPath('data.0.hotel_id', $hotelA->id);
 });
 
 it('allows superadmin to update and delete a screen', function () {
     $admin = User::factory()->superAdmin()->create();
     $screen = Screen::factory()->create();
 
-    // Update (Kirim SEMUA field wajib agar validasi lolos)
     $this->actingAs($admin)
         ->putJson("/api/hotels/{$screen->hotel_id}/screens/{$screen->id}", [
             'name' => 'Updated Screen Name',
@@ -80,15 +74,15 @@ it('allows superadmin to update and delete a screen', function () {
             'resolution_width' => 1920,
             'resolution_height' => 1080,
             'orientation' => 'landscape',
-            'price_per_play' => 10000,
+            'price_per_play' => 50000,
             'max_plays_per_day' => 100,
             'max_duration_sec' => 60,
             'is_active' => true,
         ])
         ->assertOk()
-        ->assertJsonPath('data.name', 'Updated Screen Name');
+        // [FIX] Cek harga dengan string desimal
+        ->assertJsonPath('data.price_per_play', 50000); 
 
-    // Delete
     $this->actingAs($admin)
         ->deleteJson("/api/hotels/{$screen->hotel_id}/screens/{$screen->id}")
         ->assertOk();

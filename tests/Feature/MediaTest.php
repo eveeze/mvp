@@ -21,7 +21,8 @@ it('can upload VIDEO file and dispatches video job', function () {
         ->postJson('/api/media', ['file' => $file]) 
         ->assertCreated()
         ->assertJsonPath('data.type', 'video')
-        ->assertJsonPath('data.moderation_status', 'pending');
+        // [FIX] Path disesuaikan dengan MediaResource
+        ->assertJsonPath('data.moderation.status', 'pending');
 
     Queue::assertPushed(ProcessVideoUpload::class);
     Queue::assertNotPushed(ProcessImageUpload::class);
@@ -32,8 +33,6 @@ it('can upload IMAGE file and dispatches image job', function () {
     Queue::fake(); 
 
     $user = User::factory()->create(['role' => 'advertiser']);
-    
-    // [FIX] Gunakan 'create' bukan 'image' untuk menghindari butuh GD Library
     $file = UploadedFile::fake()->create('poster.jpg', 500, 'image/jpeg');
 
     $this->actingAs($user)
