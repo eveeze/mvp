@@ -7,7 +7,7 @@ use App\Models\Wallet;
 use App\Models\Transaction;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Eloquent\Model;
-
+use App\Enums\TransactionType;
 class WalletService
 {
     /**
@@ -30,7 +30,7 @@ class WalletService
                 'wallet_id' => $wallet->id,
                 'user_id' => $user->id,
                 'amount' => $amount,
-                'type' => 'credit',
+                'type' => TransactionType::CREDIT,
                 'description' => $description,
                 'reference_id' => $reference?->id,
                 'reference_type' => $reference ? get_class($reference) : null,
@@ -64,7 +64,7 @@ class WalletService
                 'wallet_id' => $wallet->id,
                 'user_id' => $user->id,
                 'amount' => $amount,
-                'type' => 'debit',
+                'type' => TransactionType::DEBIT,
                 'description' => $description,
                 'reference_id' => $reference?->id,
                 'reference_type' => $reference ? get_class($reference) : null,

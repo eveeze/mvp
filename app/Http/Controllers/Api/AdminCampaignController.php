@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Campaign;
 use App\Services\WalletService;
+use App\Enums\CampaignStatus; // [NEW]
+use App\Http\Resources\CampaignResource; // [NEW]
 use Illuminate\Http\Request;
 
 class AdminCampaignController extends Controller
@@ -23,24 +25,23 @@ class AdminCampaignController extends Controller
         if ($request->has('status')) {
             $query->where('status', $request->status);
         } else {
-            $query->where('status', 'pending_review');
+            // [REFACTOR] Use Enum
+            $query->where('status', CampaignStatus::PENDING_REVIEW);
         }
 
-        return response()->json([
-            'status' => 'success',
-            'data' => $query->paginate(20)
-        ]);
+        return CampaignResource::collection($query->paginate(20));
     }
 
     public function approve(string $id)
     {
         $campaign = Campaign::findOrFail($id);
         
-        if ($campaign->status !== 'pending_review') {
+        // [REFACTOR] Use Enum
+        if ($campaign->status !== CampaignStatus::PENDING_REVIEW) {
             return response()->json(['message' => 'Campaign not in pending status.'], 400);
         }
 
-        $campaign->update(['status' => 'active']);
+        $campaign->update(['status' => CampaignStatus::ACTIVE]);
 
         return response()->json(['status' => 'success', 'message' => 'Campaign Approved & Active.']);
     }
@@ -51,7 +52,7 @@ class AdminCampaignController extends Controller
 
         $campaign = Campaign::findOrFail($id);
 
-        if ($campaign->status !== 'pending_review') {
+        if ($campaign->status !== CampaignStatus::PENDING_REVIEW) {
             return response()->json(['message' => 'Campaign not in pending status.'], 400);
         }
 
@@ -64,8 +65,7 @@ class AdminCampaignController extends Controller
         );
 
         $campaign->update([
-            'status' => 'rejected',
-            // Anda bisa menambahkan kolom 'rejection_reason' di tabel campaign nanti jika perlu
+            'status' => CampaignStatus::REJECTED,
         ]);
 
         return response()->json(['status' => 'success', 'message' => 'Campaign Rejected & Refunded.']);

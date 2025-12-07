@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Hotel;
 use App\Models\Screen;
+use App\Http\Resources\ScreenResource; // [NEW]
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -18,20 +19,25 @@ class ScreenController extends Controller
             $query->where('is_active', $request->boolean('is_active'));
         }
 
-        return response()->json(['status' => 'success', 'data' => $query->paginate(10)]);
+        $screens = $query->paginate(10);
+        
+        // [REFACTOR]
+        return ScreenResource::collection($screens);
     }
 
     public function store(Request $request, Hotel $hotel)
     {
         $validated = $this->validatePayload($request);
         $screen = $hotel->screens()->create($validated);
-        return response()->json(['status' => 'success', 'data' => $screen], 201);
+        
+        // [REFACTOR]
+        return new ScreenResource($screen);
     }
 
     public function show(Hotel $hotel, Screen $screen)
     {
         $this->ensureBelongsToHotel($hotel, $screen);
-        return response()->json(['status' => 'success', 'data' => $screen]);
+        return new ScreenResource($screen);
     }
 
     public function update(Request $request, Hotel $hotel, Screen $screen)
@@ -39,7 +45,8 @@ class ScreenController extends Controller
         $this->ensureBelongsToHotel($hotel, $screen);
         $validated = $this->validatePayload($request, $screen);
         $screen->update($validated);
-        return response()->json(['status' => 'success', 'data' => $screen->fresh()]);
+        
+        return new ScreenResource($screen->fresh());
     }
 
     public function destroy(Hotel $hotel, Screen $screen)
@@ -52,7 +59,6 @@ class ScreenController extends Controller
     protected function validatePayload(Request $request, ?Screen $screen = null): array
     {
         $screenId = $screen?->id;
-
         return $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'code' => ['nullable', 'string', 'max:100', Rule::unique('screens', 'code')->ignore($screenId)],
@@ -60,10 +66,7 @@ class ScreenController extends Controller
             'resolution_width'  => ['required', 'integer', 'min:100', 'max:10000'],
             'resolution_height' => ['required', 'integer', 'min:100', 'max:10000'],
             'orientation'       => ['required', Rule::in(['landscape', 'portrait'])],
-            
-            // [FIX] Boleh null agar ikut harga hotel
             'price_per_play'    => ['nullable', 'numeric', 'min:0'],
-            
             'max_plays_per_day' => ['required', 'integer', 'min:1'],
             'max_duration_sec'  => ['required', 'integer', 'min:5'],
             'is_active' => ['boolean'],

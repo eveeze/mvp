@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\TransactionResource; // [NEW]
 use Illuminate\Http\Request;
 
 class TransactionController extends Controller
@@ -14,9 +15,6 @@ class TransactionController extends Controller
             ->latest()
             ->paginate(15);
 
-        return response()->json([
-            'status' => 'success',
-            'data' => $transactions
-        ]);
+        return TransactionResource::collection($transactions);
     }
 }

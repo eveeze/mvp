@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Hotel;
+use App\Http\Resources\HotelResource; // [NEW]
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Validation\Rule;
@@ -23,8 +24,9 @@ class HotelController extends Controller
         }
 
         $hotels = $query->latest()->paginate(10);
-
-        return response()->json(['status' => 'success', 'data' => $hotels]);
+        
+        // [REFACTOR]
+        return HotelResource::collection($hotels);
     }
 
     public function store(Request $request)
@@ -41,18 +43,15 @@ class HotelController extends Controller
         ]);
 
         $hotel = Hotel::create($validated);
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Hotel created.',
-            'data' => $hotel,
-        ], 201);
+        
+        // [REFACTOR]
+        return new HotelResource($hotel);
     }
 
     public function show(string $id)
     {
         $hotel = Hotel::findOrFail($id);
-        return response()->json(['status' => 'success', 'data' => $hotel]);
+        return new HotelResource($hotel);
     }
 
     public function update(Request $request, string $id)
@@ -72,11 +71,7 @@ class HotelController extends Controller
 
         $hotel->update($validated);
 
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Hotel updated.',
-            'data' => $hotel->fresh(),
-        ]);
+        return new HotelResource($hotel->fresh());
     }
 
     public function destroy(string $id)

@@ -9,6 +9,9 @@ use App\Models\Screen;
 use App\Models\Media;
 use App\Services\WalletService;
 use App\Services\PricingService;
+use App\Enums\CampaignStatus; // [NEW] Enum
+use App\Enums\ModerationStatus; // [NEW] Enum
+use App\Http\Resources\CampaignResource; // [NEW] Resource
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -27,7 +30,6 @@ class CampaignController extends Controller
 
     public function store(Request $request)
     {
-        // 1. Validasi Input
         $request->validate([
             'name'        => 'required|string|max:255',
             'start_date'  => 'required|date|after_or_equal:today',
@@ -43,20 +45,15 @@ class CampaignController extends Controller
         $endDate   = Carbon::parse($request->end_date);
         $days      = $startDate->diffInDays($endDate) + 1;
 
-        // 2. Validasi Media
         $media = Media::where('id', $request->media_id)
             ->where('user_id', $user->id)
             ->first();
 
-        if (!$media) {
-            return response()->json(['message' => 'Media not found.'], 422);
-        }
+        if (!$media) return response()->json(['message' => 'Media not found.'], 422);
+        if ($media->status !== 'completed') return response()->json(['message' => 'Media processing not finished.'], 422);
         
-        if ($media->status !== 'completed') {
-            return response()->json(['message' => 'Media processing not finished.'], 422);
-        }
-
-        if ($media->moderation_status !== 'approved') {
+        // [REFACTOR] Gunakan Enum untuk perbandingan
+        if ($media->moderation_status !== ModerationStatus::APPROVED) {
             return response()->json([
                 'message' => 'Media belum disetujui oleh Admin.',
                 'status' => $media->moderation_status,
@@ -65,29 +62,21 @@ class CampaignController extends Controller
         }
 
         try {
-            // 3. Database Transaction
             $campaign = DB::transaction(function () use ($user, $request, $media, $startDate, $endDate, $days) {
                 
                 $totalCost = 0;
                 $campaignItemsData = [];
 
                 foreach ($request->screens as $item) {
-                    $screen = Screen::with('hotel')
-                                ->where('id', $item['id'])
-                                ->lockForUpdate() 
-                                ->first();
+                    $screen = Screen::with('hotel')->where('id', $item['id'])->lockForUpdate()->first();
 
-                    if (!$screen->is_active) {
-                        throw ValidationException::withMessages(['screens' => "Screen inactive."]);
-                    }
-                    if ($media->duration > $screen->max_duration_sec) {
-                        throw ValidationException::withMessages(['media' => "Media too long."]);
-                    }
+                    if (!$screen->is_active) throw ValidationException::withMessages(['screens' => "Screen inactive."]);
+                    if ($media->duration > $screen->max_duration_sec) throw ValidationException::withMessages(['media' => "Media too long."]);
 
-                    // 4. Cek Kapasitas (Inventory Check)
+                    // [REFACTOR] Gunakan Enum di query
                     $existingUsage = CampaignItem::where('screen_id', $screen->id)
                         ->whereHas('campaign', function ($query) use ($startDate, $endDate) {
-                            $query->whereIn('status', ['active', 'pending_review']) // Cek yang pending juga
+                            $query->whereIn('status', [CampaignStatus::ACTIVE, CampaignStatus::PENDING_REVIEW])
                                   ->where(function ($q) use ($startDate, $endDate) {
                                       $q->whereDate('start_date', '<=', $endDate)
                                         ->whereDate('end_date', '>=', $startDate);
@@ -96,18 +85,13 @@ class CampaignController extends Controller
                         ->sum('plays_per_day');
 
                     $requestedPlays = $item['plays_per_day'];
-                    $sisaSlot = max(0, $screen->max_plays_per_day - $existingUsage);
-
                     if (($existingUsage + $requestedPlays) > $screen->max_plays_per_day) {
-                        throw ValidationException::withMessages([
-                            'screens' => "Screen '{$screen->name}' penuh. Sisa slot: {$sisaSlot}."
-                        ]);
+                        $sisa = max(0, $screen->max_plays_per_day - $existingUsage);
+                        throw ValidationException::withMessages(['screens' => "Screen '{$screen->name}' penuh. Sisa slot: {$sisa}."]);
                     }
 
-                    // 5. Hitung Biaya
                     $itemTotalCost = $this->pricingService->calculatePrice($screen, $days, $requestedPlays);
                     $priceSnapshot = $itemTotalCost / ($requestedPlays * $days);
-
                     $totalCost += $itemTotalCost;
 
                     $campaignItemsData[] = [
@@ -119,59 +103,45 @@ class CampaignController extends Controller
                     ];
                 }
 
-                // 6. Simpan Header Campaign DULU (agar punya ID untuk referensi transaksi)
+                if (!$this->walletService->debitBalance($user, $totalCost, "Booking Campaign", null)) {
+                     throw ValidationException::withMessages(['balance' => 'Saldo Wallet tidak mencukupi.']);
+                }
+
+                // [REFACTOR] Set status menggunakan Enum
                 $campaign = Campaign::create([
                     'user_id'    => $user->id,
                     'name'       => $request->name,
                     'start_date' => $startDate,
                     'end_date'   => $endDate,
                     'total_cost' => $totalCost,
-                    'status'     => 'pending_review', // [UPDATE HARI 3]
-                    'moderation_status' => 'approved', 
+                    'status'     => CampaignStatus::PENDING_REVIEW,
+                    'moderation_status' => ModerationStatus::APPROVED, // Asumsi media sudah approved
                 ]);
 
                 $campaign->items()->createMany($campaignItemsData);
-
-                // 7. Potong Saldo Wallet (Wajib kirim 3 argumen: User, Amount, Description, [Reference])
-                $balanceOk = $this->walletService->debitBalance(
-                    $user, 
-                    $totalCost, 
-                    "Booking Campaign #{$campaign->id}", // [FIX] Argumen ke-3 Wajib
-                    $campaign // Argumen ke-4 (Reference)
-                );
                 
-                if (!$balanceOk) {
-                    throw ValidationException::withMessages([
-                        'balance' => 'Saldo Wallet tidak mencukupi. Total tagihan: ' . number_format($totalCost)
-                    ]);
-                }
-
                 return $campaign;
             });
 
-            return response()->json([
-                'status' => 'success', 
-                'message' => 'Campaign created successfully.', 
-                'data' => $campaign->load('items.screen'),
-            ], 201);
+            // [REFACTOR] Return API Resource
+            return new CampaignResource($campaign->load('items.screen'));
 
         } catch (ValidationException $e) {
             throw $e;
         } catch (\Exception $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Transaction failed: ' . $e->getMessage()
-            ], 500);
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
         }
     }
 
-    // ... Index & Show methods (sama)
     public function index(Request $request)
     {
         $campaigns = Campaign::with(['items.screen', 'items.media'])
             ->where('user_id', $request->user()->id)
-            ->latest()->paginate(10);
-        return response()->json(['data' => $campaigns]);
+            ->latest()
+            ->paginate(10);
+            
+        // [REFACTOR] Return Collection Resource
+        return CampaignResource::collection($campaigns);
     }
 
     public function show(Request $request, $id)
@@ -179,6 +149,7 @@ class CampaignController extends Controller
         $campaign = Campaign::with(['items.screen', 'items.media'])
             ->where('user_id', $request->user()->id)
             ->findOrFail($id);
-        return response()->json(['data' => $campaign]);
+            
+        return new CampaignResource($campaign);
     }
 }
