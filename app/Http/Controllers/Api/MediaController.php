@@ -10,6 +10,10 @@ use Illuminate\Http\Request;
 
 class MediaController extends Controller
 {
+    /**
+     * Upload Media (Video/Image).
+     * File raw disimpan private, hasil proses (HLS/WebP) akan public.
+     */
     public function store(Request $request)
     {
         $request->validate([
@@ -20,12 +24,14 @@ class MediaController extends Controller
         $user = $request->user();
         $mimeType = $file->getMimeType();
         
-        // Deteksi Tipe
+        // Deteksi Tipe Media
         $type = str_starts_with($mimeType, 'video') ? 'video' : 'image';
         $folder = $type === 'video' ? 'videos/temp' : 'images/temp';
 
-        // Upload Raw
-        $path = $file->store($folder, 's3');
+        // [SECURE STORAGE] 
+        // Simpan file mentah sebagai PRIVATE agar tidak bisa diakses publik
+        // Hanya worker yang bisa membacanya nanti via Storage::disk('s3')->readStream()
+        $path = $file->store($folder, ['disk' => 's3', 'visibility' => 'private']);
 
         $media = Media::create([
             'user_id'       => $user->id,
@@ -35,7 +41,7 @@ class MediaController extends Controller
             'size'          => $file->getSize(),
             'path_original' => $path,
             'status'        => 'pending',
-            'moderation_status' => 'pending', // Default pending
+            'moderation_status' => 'pending',
         ]);
 
         // Dispatch Job Sesuai Tipe
@@ -47,24 +53,35 @@ class MediaController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Media uploaded.',
+            'message' => 'Media uploaded successfully.',
             'data'    => $media
         ], 201);
     }
 
+    /**
+     * List Media User.
+     */
     public function index(Request $request)
     {
         $medias = Media::where('user_id', $request->user()->id)
                     ->latest()
                     ->paginate(10);
 
-        // Append helper URLs
+        // Transform collection untuk memunculkan Accessor URL
         $medias->getCollection()->transform(function ($media) {
-            $media->url = $media->url;
+            // [FIX] Gunakan append() untuk memunculkan accessor 'url' dan 'thumbnail_url'
+            // Ini menghilangkan warning "Assignment to same variable"
+            $media->append(['url', 'thumbnail_url']);
+            
+            // Mapping alias 'thumbnail' (opsional, untuk kompatibilitas frontend)
             $media->thumbnail = $media->thumbnail_url;
+            
             return $media;
         });
 
-        return response()->json(['status' => 'success', 'data' => $medias]);
+        return response()->json([
+            'status' => 'success',
+            'data' => $medias
+        ]);
     }
 }
