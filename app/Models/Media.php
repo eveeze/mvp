@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Storage;
+use App\Enums\MediaType;
+use App\Enums\ModerationStatus;
 
 class Media extends Model
 {
@@ -26,6 +28,11 @@ class Media extends Model
         'moderation_notes'
     ];
 
+    protected $casts = [
+        'type' => MediaType::class,
+        'moderation_status' => ModerationStatus::class
+    ];
+    
     /**
      * URL Utama (Video/Image Optimized)
      */

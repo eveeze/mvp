@@ -5,7 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
-
+use App\Enums\CampaignStatus;
+use App\Enums\ModerationStatus;
 class Campaign extends Model
 {
     use HasFactory, SoftDeletes;
@@ -18,12 +19,15 @@ class Campaign extends Model
         'total_cost', 
         'status', // pending_review, active, rejected, finished
         'moderation_status', // approved (dari media)
+        'moderation_notes'
     ];
 
     protected $casts = [
         'start_date' => 'date',
         'end_date'   => 'date',
         'total_cost' => 'decimal:2',
+        'status' => CampaignStatus::class,
+        'moderation_status' => ModerationStatus::class,
     ];
 
     public function items()
