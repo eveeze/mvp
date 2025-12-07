@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\Deposit;
 use App\Services\MidtransService;
 use App\Services\WalletService;
+use App\Mail\DepositReceived; // Import
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail; // Import
 
 class CallbackController extends Controller
 {
@@ -15,9 +17,7 @@ class CallbackController extends Controller
     {
         $notification = $midtrans->handleNotification();
 
-        if (!$notification) {
-            return response()->json(['message' => 'Invalid signature'], 403);
-        }
+        if (!$notification) return response()->json(['message' => 'Invalid signature'], 403);
 
         $transactionStatus = $notification->transaction_status;
         $orderId = $notification->order_id;
@@ -29,13 +29,8 @@ class CallbackController extends Controller
         if ($deposit->status === 'paid') return response()->json(['message' => 'Already processed']);
 
         $newStatus = null;
-
         if ($transactionStatus == 'capture') {
-            if ($fraud == 'challenge') {
-                $newStatus = 'pending';
-            } else {
-                $newStatus = 'paid';
-            }
+            $newStatus = $fraud == 'challenge' ? 'pending' : 'paid';
         } elseif ($transactionStatus == 'settlement') {
             $newStatus = 'paid';
         } elseif ($transactionStatus == 'pending') {
@@ -51,14 +46,11 @@ class CallbackController extends Controller
 
             if ($newStatus === 'paid') {
                 try {
-                    // [UPDATE] Menggunakan creditBalance baru yang mencatat transaksi
-                    $walletService->creditBalance(
-                        $deposit->user, 
-                        $deposit->amount, 
-                        "Topup Deposit #{$deposit->order_id}",
-                        $deposit // Reference object
-                    );
-                    Log::info("Saldo added User: {$deposit->user_id}");
+                    $walletService->creditBalance($deposit->user, $deposit->amount, "Topup Deposit #{$deposit->order_id}", $deposit);
+                    
+                    // [KIRIM EMAIL]
+                    Mail::to($deposit->user->email)->queue(new DepositReceived($deposit));
+                    
                 } catch (\Exception $e) {
                     Log::error("Wallet Update Failed: " . $e->getMessage());
                 }
